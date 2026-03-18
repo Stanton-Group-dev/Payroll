@@ -34,6 +34,7 @@ interface MatchedRow extends WorkyardRow {
 
 /** Resolution for an unrecognized project string */
 type ProjectResolution =
+  | { action: 'link_property'; propertyId: string }
   | { action: 'link'; projectId: string }
   | { action: 'create'; name: string; client_name: string; billed_to: string }
   | { action: 'ignore' }
@@ -82,6 +83,14 @@ export default function ImportPage() {
     const empByName = Object.fromEntries(employeePool.map(e => [normalizeName(e.name), e]))
     const empByFirstName = Object.fromEntries(employeePool.map(e => [normalizeName(e.name).split(' ')[0], e]))
 
+    // Build property alias lookup: normalized alias → property
+    const propByAlias = new Map<string, typeof propertyList[0]>()
+    for (const p of propertyList) {
+      for (const alias of (p.workyard_aliases ?? [])) {
+        propByAlias.set(alias.trim().toLowerCase(), p)
+      }
+    }
+
     // Build external project lookup: normalized customer name → project
     const extByCustomerName = new Map<string, ExternalProject>()
     for (const ep of extPool) {
@@ -114,24 +123,32 @@ export default function ImportPage() {
         status = 'flagged'
         flag = `Overhead property: "${row.projectName}" — needs redistribution`
       } else if (!prop) {
-        // Try external project match by customerName
+        // Try property alias match (workyard_aliases on properties table)
         const custKey = row.customerName?.trim().toLowerCase()
         const projKey = row.projectName?.trim().toLowerCase()
-        const extMatch = (custKey ? extByCustomerName.get(custKey) : undefined) ?? (projKey ? extByCustomerName.get(projKey) : undefined)
-        if (extMatch) {
+        const aliasMatch = (custKey ? propByAlias.get(custKey) : undefined) ?? (projKey ? propByAlias.get(projKey) : undefined)
+        if (aliasMatch) {
           status = 'ok'
-          externalProjectId = extMatch.id
-          propertyName = extMatch.name
-          propertyId = undefined as unknown as string // external project, not a property
+          propertyId = aliasMatch.id
+          propertyName = aliasMatch.name
         } else {
-          // Is it an S-code that just isn't in the system? (starts with S followed by digits)
-          const looksLikeSCode = /^s\d{3,}/i.test(row.projectName?.trim() ?? '')
-          if (looksLikeSCode) {
-            status = 'flagged'
-            flag = `Property "${row.projectName}" not found in system`
+          // Try external project match by customerName
+          const extMatch = (custKey ? extByCustomerName.get(custKey) : undefined) ?? (projKey ? extByCustomerName.get(projKey) : undefined)
+          if (extMatch) {
+            status = 'ok'
+            externalProjectId = extMatch.id
+            propertyName = extMatch.name
+            propertyId = undefined as unknown as string // external project, not a property
           } else {
-            status = 'unrecognized_project'
-            flag = `Unrecognized project: "${row.customerName || row.projectName}" — resolve before import`
+            // Is it an S-code that just isn't in the system? (starts with S followed by digits)
+            const looksLikeSCode = /^s\d{3,}/i.test(row.projectName?.trim() ?? '')
+            if (looksLikeSCode) {
+              status = 'flagged'
+              flag = `Property "${row.projectName}" not found in system`
+            } else {
+              status = 'unrecognized_project'
+              flag = `Unrecognized project: "${row.customerName || row.projectName}" — resolve before import`
+            }
           }
         }
       }
@@ -283,14 +300,23 @@ export default function ImportPage() {
     setResolutions(prev => ({ ...prev, [key]: resolution }))
   }
 
-  // Apply all resolutions: link to existing project or create new ones, then re-match
+  // Apply all resolutions: link to property, existing project, or create new ones, then re-match
   const applyResolutions = async () => {
     const supabase = createClient()
     const updatedExt = [...extProjects]
 
     for (const [key, res] of Object.entries(resolutions)) {
       if (res.action === 'ignore') continue
-      if (res.action === 'link') {
+      if (res.action === 'link_property') {
+        const prop = propertyList.find(p => p.id === res.propertyId)
+        if (prop) {
+          const aliases = [...(prop.workyard_aliases ?? [])]
+          const originalStr = preview.find(r => (r.customerName || r.projectName).trim().toLowerCase() === key)?.customerName || preview.find(r => (r.customerName || r.projectName).trim().toLowerCase() === key)?.projectName || key
+          if (!aliases.some(a => a.toLowerCase() === key)) aliases.push(originalStr.trim())
+          await supabase.from('properties').update({ workyard_aliases: aliases }).eq('id', prop.id)
+          prop.workyard_aliases = aliases
+        }
+      } else if (res.action === 'link') {
         const proj = updatedExt.find(p => p.id === res.projectId)
         if (proj) {
           const names = [...(proj.workyard_customer_names ?? [])]
@@ -553,13 +579,28 @@ export default function ImportPage() {
                                   className="flex-1 text-xs"
                                   defaultValue=""
                                   onChange={e => {
-                                    if (e.target.value) resolveProject(key, { action: 'link', projectId: e.target.value })
+                                    const v = e.target.value
+                                    if (!v) return
+                                    if (v.startsWith('prop::')) {
+                                      resolveProject(key, { action: 'link_property', propertyId: v.slice(6) })
+                                    } else if (v.startsWith('ext::')) {
+                                      resolveProject(key, { action: 'link', projectId: v.slice(5) })
+                                    }
                                   }}
                                 >
-                                  <option value="">Link to existing project…</option>
-                                  {extProjects.map(p => (
-                                    <option key={p.id} value={p.id}>{p.name} ({p.client_name})</option>
-                                  ))}
+                                  <option value="">Assign to…</option>
+                                  <optgroup label="Properties">
+                                    {propertyList.map(p => (
+                                      <option key={p.id} value={`prop::${p.id}`}>{p.code} — {p.name}</option>
+                                    ))}
+                                  </optgroup>
+                                  {extProjects.length > 0 && (
+                                    <optgroup label="External Projects">
+                                      {extProjects.map(p => (
+                                        <option key={p.id} value={`ext::${p.id}`}>{p.name} ({p.client_name})</option>
+                                      ))}
+                                    </optgroup>
+                                  )}
                                 </FormSelect>
                                 <FormButton
                                   size="sm" variant="secondary"
@@ -574,10 +615,15 @@ export default function ImportPage() {
                                   <Ban size={12} className="mr-1" />Ignore
                                 </FormButton>
                               </div>
+                            ) : res.action === 'link_property' ? (
+                              <p className="text-xs text-[var(--success)]">
+                                <Link2 size={11} className="inline mr-1" />
+                                Linking to property: {propertyList.find(p => p.id === res.propertyId)?.name ?? 'Unknown'}
+                              </p>
                             ) : res.action === 'link' ? (
                               <p className="text-xs text-[var(--success)]">
                                 <Link2 size={11} className="inline mr-1" />
-                                Linking to: {extProjects.find(p => p.id === res.projectId)?.name ?? 'Unknown'}
+                                Linking to project: {extProjects.find(p => p.id === res.projectId)?.name ?? 'Unknown'}
                               </p>
                             ) : res.action === 'create' ? (
                               <div className="space-y-2">

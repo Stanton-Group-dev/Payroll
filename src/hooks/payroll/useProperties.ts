@@ -7,6 +7,7 @@ export interface PropertyOption {
   id: string
   code: string
   name: string
+  workyard_aliases?: string[]
 }
 
 export function useProperties(activeOnly = true) {
@@ -18,7 +19,7 @@ export function useProperties(activeOnly = true) {
     setLoading(true)
     setError(null)
     const supabase = createClient()
-    let query = supabase.from('properties').select('id, code, name').order('code')
+    let query = supabase.from('properties').select('id, code, name, workyard_aliases').order('code')
     if (activeOnly) query = query.eq('is_active', true)
     const { data, error: err } = await query
     if (err) setError(err.message)
