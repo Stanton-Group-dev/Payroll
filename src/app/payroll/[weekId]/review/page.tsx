@@ -2,16 +2,18 @@
 
 import { useMemo } from 'react'
 import { use } from 'react'
-import { DollarSign, Lock } from 'lucide-react'
+import Link from 'next/link'
+import { DollarSign, Lock, CheckSquare, Square, ChevronRight } from 'lucide-react'
 import { usePayrollWeekReview } from '@/hooks/payroll/usePayrollWeekReview'
 import { PageHeader, FormButton, InfoBlock, StatusBadge } from '@/components/form'
+import { format } from 'date-fns'
 import { calculatePayroll, resolveRateAsOf, formatCurrency } from '@/lib/payroll/calculations'
 
 export default function WeekReviewPage({ params }: { params: Promise<{ weekId: string }> }) {
   const { weekId } = use(params)
   const {
     week, employees, entries, adjustments, feeConfigs, properties, employeeRates,
-    approved, pendingCount, loading, approving, approvePayroll,
+    approved, pendingCount, flaggedCount, deptSplitsComplete, loading, approving, approvePayroll,
   } = usePayrollWeekReview(weekId)
 
   const result = useMemo(() => {
@@ -24,10 +26,11 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
     return calculatePayroll(employeesWithHistoricalRates, entries, adjustments, feeConfigs, properties)
   }, [employees, employeeRates, week, entries, adjustments, feeConfigs, properties])
 
-  const timesheetApproved = week?.status !== 'draft'
-  const canApprovePayroll = timesheetApproved && !approved && result !== null && pendingCount === 0
+  const hasTimeCards = entries.length > 0
+  const flagsResolved = flaggedCount === 0 && pendingCount === 0
   const hasPhoneReimbursements = adjustments.some(a => a.type === 'phone')
-  const showAdjustmentReminder = timesheetApproved && !approved && !hasPhoneReimbursements
+  const allChecked = hasTimeCards && flagsResolved && hasPhoneReimbursements && deptSplitsComplete
+  const canApprovePayroll = allChecked && !approved && result !== null
 
   if (loading) return <div className="p-8 text-[var(--muted)]">Loading…</div>
 
@@ -40,35 +43,61 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
       />
 
       <div className="p-6 space-y-6">
-        {!timesheetApproved && (
-          <InfoBlock variant="warning" title="Timesheet Not Yet Approved">
-            Resolve all flagged entries and approve the timesheet before payroll can be calculated.
-            <div className="mt-1">
-              <a href={`/payroll/timesheets?week=${weekId}`} className="underline">Go to Timesheet Adjustments →</a>
+        {/* Week Status Board — always visible */}
+        {!approved ? (
+          <div className="border border-[var(--border)] bg-white p-5">
+            <p className="text-xs text-[var(--muted)] uppercase tracking-widest font-medium mb-3">
+              Before you can approve payroll
+            </p>
+            <div className="space-y-2">
+              <ChecklistRow
+                checked={hasTimeCards}
+                label="Time cards imported"
+                href={`/payroll/import`}
+                linkLabel="Go to Import"
+              />
+              <ChecklistRow
+                checked={flagsResolved}
+                label="Flagged entries resolved"
+                detail={!flagsResolved ? `${flaggedCount + pendingCount} unresolved` : undefined}
+                href={`/payroll/timesheets?week=${weekId}`}
+                linkLabel="Go to Timesheet Adjustments"
+              />
+              <ChecklistRow
+                checked={hasPhoneReimbursements}
+                label="Phone reimbursements seeded"
+                href={`/payroll/adjustments?week=${weekId}`}
+                linkLabel="Go to Adjustments"
+              />
+              <ChecklistRow
+                checked={deptSplitsComplete}
+                label="Dept splits confirmed"
+                href={`/payroll/splits?week=${weekId}`}
+                linkLabel="Go to Dept Splits"
+              />
             </div>
-          </InfoBlock>
-        )}
-
-        {timesheetApproved && pendingCount > 0 && !approved && (
-          <InfoBlock variant="warning" title="Pending Entries Block Approval">
-            {pendingCount} {pendingCount === 1 ? 'entry is' : 'entries are'} marked Pending and must be resolved or discarded before payroll can be approved.
-            <div className="mt-1">
-              <a href={`/payroll/timesheets?week=${weekId}`} className="underline">Go to Timesheet Adjustments →</a>
+            <div className="mt-5 pt-4 border-t border-[var(--divider)]">
+              <FormButton
+                onClick={() => result && approvePayroll(result)}
+                loading={approving}
+                disabled={!canApprovePayroll}
+              >
+                <Lock size={14} className="mr-2" />
+                Approve Payroll &amp; Unlock Invoice Generation
+              </FormButton>
+              {!allChecked && (
+                <p className="text-xs text-[var(--muted)] mt-2">
+                  Complete all items above to unlock approval.
+                </p>
+              )}
+              {allChecked && (
+                <p className="text-xs text-[var(--muted)] mt-2">
+                  This locks the payroll calculation. Records cannot be edited after approval.
+                </p>
+              )}
             </div>
-          </InfoBlock>
-        )}
-
-        {showAdjustmentReminder && (
-          <InfoBlock variant="warning" title="Check Adjustments Before Approving">
-            No phone reimbursements found for this week. Have you seeded them?
-            <div className="mt-1 flex gap-4">
-              <a href={`/payroll/adjustments?week=${weekId}`} className="underline">Go to Adjustments →</a>
-              <a href={`/payroll/splits?week=${weekId}`} className="underline">Go to Dept Splits →</a>
-            </div>
-          </InfoBlock>
-        )}
-
-        {approved && (
+          </div>
+        ) : (
           <InfoBlock variant="success" title="Payroll Approved">
             This payroll week has been approved. Invoice generation is now unlocked.
             <div className="mt-2">
@@ -194,21 +223,48 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
               </div>
             </div>
 
-            {/* Approve */}
-            {canApprovePayroll && (
-              <div className="pt-4 border-t border-[var(--divider)]">
-                <FormButton onClick={() => approvePayroll(result!)} loading={approving}>
-                  <Lock size={14} className="mr-2" />
-                  Approve Payroll &amp; Unlock Invoice Generation
-                </FormButton>
-                <p className="text-xs text-[var(--muted)] mt-2">
-                  This locks the payroll calculation. Records cannot be edited after approval.
-                </p>
-              </div>
-            )}
           </>
         )}
       </div>
+    </div>
+  )
+}
+
+function ChecklistRow({
+  checked,
+  label,
+  detail,
+  href,
+  linkLabel,
+}: {
+  checked: boolean
+  label: string
+  detail?: string
+  href: string
+  linkLabel: string
+}) {
+  return (
+    <div className="flex items-center gap-3 py-1.5">
+      {checked ? (
+        <CheckSquare size={16} className="text-[var(--success)] shrink-0" />
+      ) : (
+        <Square size={16} className="text-[var(--muted)] shrink-0" />
+      )}
+      <span className={`text-sm flex-1 ${checked ? 'text-[var(--muted)] line-through' : 'text-[var(--ink)]'}`}>
+        {label}
+      </span>
+      {detail && (
+        <span className="text-xs text-[var(--warning)] font-medium">{detail}</span>
+      )}
+      {!checked && (
+        <Link
+          href={href}
+          className="flex items-center gap-1 text-xs text-[var(--accent)] hover:text-[var(--primary)] transition-colors font-medium"
+        >
+          {linkLabel}
+          <ChevronRight size={12} />
+        </Link>
+      )}
     </div>
   )
 }

@@ -23,6 +23,8 @@ export function usePayrollWeekReview(weekId: string) {
   const [employeeRates, setEmployeeRates] = useState<PayrollEmployeeRate[]>([])
   const [approved, setApproved] = useState(false)
   const [pendingCount, setPendingCount] = useState(0)
+  const [flaggedCount, setFlaggedCount] = useState(0)
+  const [deptSplitsComplete, setDeptSplitsComplete] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [approving, setApproving] = useState(false)
@@ -50,14 +52,47 @@ export function usePayrollWeekReview(weekId: string) {
     setProperties(propRes.data ?? [])
     setEmployeeRates(ratesRes.data ?? [])
     setApproved((approvalRes.data?.length ?? 0) > 0)
-    // Count pending entries that block approval
-    const pendingRes = await supabase
-      .from('payroll_time_entries')
-      .select('id', { count: 'exact', head: true })
-      .eq('payroll_week_id', weekId)
-      .eq('pending_resolution', true)
-      .eq('is_active', true)
+    // Count pending + flagged entries that block approval
+    const [pendingRes, flaggedRes] = await Promise.all([
+      supabase
+        .from('payroll_time_entries')
+        .select('id', { count: 'exact', head: true })
+        .eq('payroll_week_id', weekId)
+        .eq('pending_resolution', true)
+        .eq('is_active', true),
+      supabase
+        .from('payroll_time_entries')
+        .select('id', { count: 'exact', head: true })
+        .eq('payroll_week_id', weekId)
+        .eq('is_flagged', true)
+        .eq('is_active', true),
+    ])
     setPendingCount(pendingRes.count ?? 0)
+    setFlaggedCount(flaggedRes.count ?? 0)
+
+    // Check dept splits: all active salaried employees must have a default split or a week override
+    const salariedEmployees = (empRes.data ?? []).filter(e => e.type === 'salaried')
+    if (salariedEmployees.length === 0) {
+      setDeptSplitsComplete(true)
+    } else {
+      const salariedIds = salariedEmployees.map(e => e.id)
+      const [defaultSplitsRes, overridesRes] = await Promise.all([
+        supabase
+          .from('payroll_employee_dept_splits')
+          .select('employee_id')
+          .in('employee_id', salariedIds),
+        supabase
+          .from('payroll_dept_split_overrides')
+          .select('employee_id')
+          .eq('payroll_week_id', weekId)
+          .in('employee_id', salariedIds),
+      ])
+      const coveredIds = new Set([
+        ...(defaultSplitsRes.data ?? []).map(r => r.employee_id),
+        ...(overridesRes.data ?? []).map(r => r.employee_id),
+      ])
+      setDeptSplitsComplete(salariedIds.every(id => coveredIds.has(id)))
+    }
     setLoading(false)
   }, [weekId])
 
@@ -96,7 +131,7 @@ export function usePayrollWeekReview(weekId: string) {
 
   return {
     week, employees, entries, adjustments, feeConfigs, properties, employeeRates,
-    approved, pendingCount, loading, error, approving,
+    approved, pendingCount, flaggedCount, deptSplitsComplete, loading, error, approving,
     approvePayroll, refetch: load,
   }
 }

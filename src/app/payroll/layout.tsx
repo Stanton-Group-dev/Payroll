@@ -34,6 +34,7 @@ import { useAuth } from '@/hooks/payroll/useAuth'
 import { usePayrollWeeks } from '@/hooks/payroll/usePayrollWeeks'
 import { format } from 'date-fns'
 import type { LucideIcon } from 'lucide-react'
+import { getStepHref } from '@/lib/payroll/stepRouting'
 
 /* ---------- Setup items (do-once, revisit occasionally) ---------- */
 const setupItems = [
@@ -165,7 +166,7 @@ export default function PayrollLayout({ children }: { children: React.ReactNode 
         {/* Active week context strip */}
         {activeWeek && (
           <Link
-            href={`/payroll/${activeWeek.id}/review`}
+            href={getStepHref(activeWeek.id, activeWeek.status)}
             className="px-4 py-2.5 bg-white/5 border-b border-white/10 hover:bg-white/10 transition-colors"
           >
             <p className="text-xs text-white/90 font-medium">

@@ -7,6 +7,7 @@ import { usePayrollWeeks } from '@/hooks/payroll/usePayrollWeeks'
 import { PageHeader, FormButton, FormField, FormInput, StatusBadge } from '@/components/form'
 import { format, addDays, startOfWeek } from 'date-fns'
 import type { PayrollWeek } from '@/lib/supabase/types'
+import { getStepHref } from '@/lib/payroll/stepRouting'
 
 const statusOrder: Record<string, number> = {
   draft: 0,
@@ -63,7 +64,7 @@ export default function PayrollDashboard() {
   const suggestedStart = format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd')
 
   const firstAwaitingWeek = weeks.find(w => w.status === 'corrections_complete')
-  const awaitingHref = firstAwaitingWeek ? `/payroll/${firstAwaitingWeek.id}/review` : '/payroll'
+  const awaitingHref = firstAwaitingWeek ? getStepHref(firstAwaitingWeek.id, firstAwaitingWeek.status) : '/payroll'
 
   return (
     <div>
@@ -128,7 +129,7 @@ export default function PayrollDashboard() {
               return (
                 <Link
                   key={week.id}
-                  href={`/payroll/${week.id}/review`}
+                  href={getStepHref(week.id, week.status)}
                   className="flex items-center gap-4 px-5 py-4 bg-white border border-[var(--border)] hover:border-[var(--primary)]/30 hover:bg-[var(--bg-section)] transition-colors group"
                 >
                   <div className="shrink-0">
