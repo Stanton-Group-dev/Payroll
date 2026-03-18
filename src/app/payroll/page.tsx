@@ -2,10 +2,11 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { Plus, Calendar, ChevronRight, AlertCircle, CheckCircle2, Clock } from 'lucide-react'
+import { Plus, Calendar, ChevronRight, AlertCircle, CheckCircle2, Clock, Trash2 } from 'lucide-react'
 import { usePayrollWeeks } from '@/hooks/payroll/usePayrollWeeks'
 import { PageHeader, FormButton, FormField, FormInput, StatusBadge } from '@/components/form'
 import { format, addDays, startOfWeek } from 'date-fns'
+import type { PayrollWeek } from '@/lib/supabase/types'
 
 const statusOrder: Record<string, number> = {
   draft: 0,
@@ -24,10 +25,23 @@ const statusLabel: Record<string, string> = {
 }
 
 export default function PayrollDashboard() {
-  const { weeks, loading, createWeek } = usePayrollWeeks()
+  const { weeks, loading, createWeek, deleteWeek } = usePayrollWeeks()
   const [showNew, setShowNew] = useState(false)
   const [weekStart, setWeekStart] = useState('')
   const [saving, setSaving] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState<PayrollWeek | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
+  const handleDelete = async () => {
+    if (!confirmDelete) return
+    setDeleting(true)
+    try {
+      await deleteWeek(confirmDelete.id)
+      setConfirmDelete(null)
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   const handleCreate = async () => {
     if (!weekStart) return
@@ -140,6 +154,13 @@ export default function PayrollDashboard() {
                   </div>
                   <div className="shrink-0 flex items-center gap-3">
                     <StatusBadge status={week.status} label={statusLabel[week.status]} />
+                    <button
+                      onClick={e => { e.preventDefault(); e.stopPropagation(); setConfirmDelete(week) }}
+                      className="p-1.5 rounded text-[var(--muted)] hover:text-red-600 hover:bg-red-50 transition-colors opacity-0 group-hover:opacity-100"
+                      title="Delete week"
+                    >
+                      <Trash2 size={14} />
+                    </button>
                     <ChevronRight size={16} className="text-[var(--muted)] group-hover:text-[var(--primary)] transition-colors" />
                   </div>
                 </Link>
@@ -175,6 +196,29 @@ export default function PayrollDashboard() {
           </div>
         )}
       </div>
+      {/* Delete confirmation modal */}
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white border border-[var(--border)] p-6 max-w-md w-full mx-4 shadow-lg">
+            <h3 className="font-serif text-base text-[var(--primary)] mb-2">Delete Payroll Week</h3>
+            <p className="text-sm text-[var(--muted)] mb-1">
+              Are you sure you want to delete the week of{' '}
+              <strong>{format(new Date(confirmDelete.week_start + 'T00:00:00'), 'MMM d, yyyy')}</strong>?
+            </p>
+            <p className="text-xs text-red-600 mb-5">
+              This will permanently delete all time entries, adjustments, approvals, invoices, and other data associated with this week.
+            </p>
+            <div className="flex justify-end gap-2">
+              <FormButton variant="ghost" onClick={() => setConfirmDelete(null)} disabled={deleting}>
+                Cancel
+              </FormButton>
+              <FormButton onClick={handleDelete} loading={deleting} className="bg-red-600 hover:bg-red-700 text-white border-red-600">
+                Delete
+              </FormButton>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

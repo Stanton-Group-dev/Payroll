@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { Plus, Pencil } from 'lucide-react'
+import { useState, useEffect, useCallback, KeyboardEvent } from 'react'
+import { Plus, Pencil, X } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import {
   PageHeader, FormButton, FormField, FormInput, FormTextarea,
@@ -15,10 +15,11 @@ interface ExternalProject {
   billed_to: string
   is_active: boolean
   notes: string | null
+  workyard_customer_names: string[]
   created_at: string
 }
 
-const empty: Partial<ExternalProject> = { name: '', client_name: '', billed_to: '', is_active: true, notes: '' }
+const empty: Partial<ExternalProject> = { name: '', client_name: '', billed_to: '', is_active: true, notes: '', workyard_customer_names: [] }
 
 export default function ExternalProjectsPage() {
   const [projects, setProjects] = useState<ExternalProject[]>([])
@@ -27,6 +28,7 @@ export default function ExternalProjectsPage() {
   const [editing, setEditing] = useState<Partial<ExternalProject>>(empty)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [tagInput, setTagInput] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -38,8 +40,25 @@ export default function ExternalProjectsPage() {
 
   useEffect(() => { load() }, [load])
 
-  const openNew = () => { setEditing({ ...empty }); setError(null); setDrawerOpen(true) }
-  const openEdit = (p: ExternalProject) => { setEditing({ ...p }); setError(null); setDrawerOpen(true) }
+  const openNew = () => { setEditing({ ...empty }); setTagInput(''); setError(null); setDrawerOpen(true) }
+  const openEdit = (p: ExternalProject) => { setEditing({ ...p, workyard_customer_names: p.workyard_customer_names ?? [] }); setTagInput(''); setError(null); setDrawerOpen(true) }
+
+  const addTag = () => {
+    const v = tagInput.trim()
+    if (!v) return
+    const current = editing.workyard_customer_names ?? []
+    if (current.some(n => n.toLowerCase() === v.toLowerCase())) { setTagInput(''); return }
+    setEditing(p => ({ ...p, workyard_customer_names: [...(p.workyard_customer_names ?? []), v] }))
+    setTagInput('')
+  }
+
+  const removeTag = (idx: number) => {
+    setEditing(p => ({ ...p, workyard_customer_names: (p.workyard_customer_names ?? []).filter((_, i) => i !== idx) }))
+  }
+
+  const handleTagKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') { e.preventDefault(); addTag() }
+  }
 
   const handleSave = async () => {
     if (!editing.name?.trim()) { setError('Name is required'); return }
@@ -91,8 +110,8 @@ export default function ExternalProjectsPage() {
                   <th className="px-4 py-2.5 text-left font-medium">Project Name</th>
                   <th className="px-4 py-2.5 text-left font-medium">Client</th>
                   <th className="px-4 py-2.5 text-left font-medium">Billed To</th>
+                  <th className="px-4 py-2.5 text-left font-medium">Workyard Names</th>
                   <th className="px-4 py-2.5 text-left font-medium">Status</th>
-                  <th className="px-4 py-2.5 text-left font-medium">Notes</th>
                   <th className="px-4 py-2.5 w-16" />
                 </tr>
               </thead>
@@ -102,8 +121,18 @@ export default function ExternalProjectsPage() {
                     <td className="px-4 py-3 font-medium">{proj.name}</td>
                     <td className="px-4 py-3">{proj.client_name}</td>
                     <td className="px-4 py-3">{proj.billed_to}</td>
+                    <td className="px-4 py-3">
+                      {(proj.workyard_customer_names ?? []).length > 0 ? (
+                        <div className="flex flex-wrap gap-1">
+                          {proj.workyard_customer_names.map((n, j) => (
+                            <span key={j} className="inline-block px-1.5 py-0.5 bg-[var(--bg-section)] border border-[var(--border)] text-xs text-[var(--ink)]">{n}</span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-[var(--muted)] text-xs">—</span>
+                      )}
+                    </td>
                     <td className="px-4 py-3"><StatusBadge status={proj.is_active ? 'active' : 'inactive'} /></td>
-                    <td className="px-4 py-3 text-[var(--muted)] text-xs max-w-64 truncate">{proj.notes}</td>
                     <td className="px-4 py-3 text-right">
                       <button onClick={() => openEdit(proj)} className="text-[var(--muted)] hover:text-[var(--primary)] transition-colors">
                         <Pencil size={13} />
@@ -127,6 +156,28 @@ export default function ExternalProjectsPage() {
         </FormField>
         <FormField label="Billed To" required helperText="Person or entity who receives the invoice">
           <FormInput value={editing.billed_to ?? ''} onChange={e => setEditing(p => ({ ...p, billed_to: e.target.value }))} placeholder="e.g., Zach" />
+        </FormField>
+        <FormField label="Workyard Project Name(s)" helperText="What does this project get called in Workyard? Can add multiple if it varies.">
+          <div className="flex flex-wrap gap-1.5 mb-2">
+            {(editing.workyard_customer_names ?? []).map((tag, i) => (
+              <span key={i} className="inline-flex items-center gap-1 px-2 py-1 bg-[var(--bg-section)] border border-[var(--border)] text-xs text-[var(--ink)]">
+                {tag}
+                <button type="button" onClick={() => removeTag(i)} className="text-[var(--muted)] hover:text-[var(--error)] transition-colors">
+                  <X size={10} />
+                </button>
+              </span>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <FormInput
+              value={tagInput}
+              onChange={e => setTagInput(e.target.value)}
+              onKeyDown={handleTagKeyDown}
+              placeholder="Type a name, press Enter"
+              className="flex-1"
+            />
+            <FormButton type="button" variant="secondary" size="sm" onClick={addTag} disabled={!tagInput.trim()}>Add</FormButton>
+          </div>
         </FormField>
         <FormField label="Notes">
           <FormTextarea value={editing.notes ?? ''} onChange={e => setEditing(p => ({ ...p, notes: e.target.value }))} rows={2} />
