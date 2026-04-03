@@ -29,6 +29,7 @@ import {
   FileOutput,
   FileCheck,
   Circle,
+  ClipboardList,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/payroll/useAuth'
 import { usePayrollWeeks } from '@/hooks/payroll/usePayrollWeeks'
@@ -45,6 +46,7 @@ const setupItems = [
   { href: '/payroll/admin/travel-premiums', label: 'Travel Premiums', icon: Car },
   { href: '/payroll/admin/users', label: 'Users & Roles', icon: Users },
   { href: '/payroll/admin/thresholds', label: 'Budget Thresholds', icon: Target },
+  { href: '/payroll/admin/onboarding', label: 'Employee Onboarding', icon: ClipboardList },
 ]
 
 /* ---------- This Week steps (numbered workflow) ---------- */
