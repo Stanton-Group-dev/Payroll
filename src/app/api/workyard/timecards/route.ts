@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { fetchWorkyardTimecards, isWorkyardApiError } from '@/lib/payroll/workyard-api'
+import { isWorkyardMockEnabled } from '@/lib/payroll/workyard-mock'
 
 export async function GET(req: NextRequest) {
   const weekStart = req.nextUrl.searchParams.get('weekStart')
@@ -7,7 +8,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'weekStart param required (YYYY-MM-DD)' }, { status: 400 })
   }
 
-  if (!process.env.WORKYARD_API_KEY || !process.env.WORKYARD_ORG_ID) {
+  // Mock mode bypasses the credential requirement (returns dummy data).
+  if (!isWorkyardMockEnabled() && (!process.env.WORKYARD_API_KEY || !process.env.WORKYARD_ORG_ID)) {
     return NextResponse.json({ error: 'Workyard API credentials not configured' }, { status: 500 })
   }
 

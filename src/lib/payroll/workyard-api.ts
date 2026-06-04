@@ -1,5 +1,6 @@
 import type { WorkyardRow } from '@/lib/payroll/csv-parser'
 import { WORKYARD_ORG_TIMEZONE } from '@/lib/payroll/config'
+import { isWorkyardMockEnabled, generateMockTimecards } from '@/lib/payroll/workyard-mock'
 
 const BASE_URL = 'https://api.workyard.com'
 const API_KEY = process.env.WORKYARD_API_KEY!
@@ -272,6 +273,11 @@ export async function fetchWorkyardTimecards(
   weekStart: string,
   approvedOnly = true
 ): Promise<{ rows: WorkyardRow[]; stats: { total: number; allocations: number } }> {
+  // Dev/test path: return deterministic dummy data instead of calling Workyard.
+  if (isWorkyardMockEnabled()) {
+    return generateMockTimecards(weekStart)
+  }
+
   const startUnix = orgMidnightUnix(weekStart)
   // Advance 7 days from noon UTC to stay in the right calendar day, then find midnight
   const endProbe = new Date(`${weekStart}T12:00:00Z`)
