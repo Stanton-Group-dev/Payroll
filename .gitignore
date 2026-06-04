@@ -10,10 +10,12 @@ node_modules/
 # Production build
 /build
 
-# Environment variables
+# env files
+.env*.local
 .env
-.env.local
-.env.*.local
+
+# local agent/editor config that may hold credentials
+.claude/settings.local.json
 
 # Debug
 npm-debug.log*

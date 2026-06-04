@@ -1,0 +1,27 @@
+#!/bin/sh
+# Block commits that contain secrets. Free, local-only guardrail.
+# Requires gitleaks: https://github.com/gitleaks/gitleaks
+#   Windows: winget install Gitleaks.Gitleaks   (or) scoop install gitleaks
+#   macOS:   brew install gitleaks
+#
+# Auto-wired by the "prepare" script in package.json (sets core.hooksPath).
+
+if ! command -v gitleaks >/dev/null 2>&1; then
+  echo "⚠  gitleaks not installed — skipping secret scan."
+  echo "   Install it so this guardrail actually protects you:"
+  echo "   https://github.com/gitleaks/gitleaks"
+  exit 0
+fi
+
+gitleaks git --staged --redact --no-banner
+status=$?
+
+if [ $status -ne 0 ]; then
+  echo ""
+  echo "✖  gitleaks found a potential secret in your staged changes — commit blocked."
+  echo "   Move the value into Bitwarden Secrets Manager and reference it via env."
+  echo "   If it's a false positive, add an allowlist entry to .gitleaks.toml."
+  exit 1
+fi
+
+exit 0
