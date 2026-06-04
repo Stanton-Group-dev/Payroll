@@ -262,11 +262,10 @@ export function InlineDrawer({
 }: InlineDrawerProps) {
   const isUnallocated = cell.rowPropertyId === null
   const primaryEntry = cell.entries[0]
-  if (!primaryEntry) return null
-
-  const entryHours = primaryEntry.regular_hours + primaryEntry.ot_hours
-  const entryDate = format(parseISO(primaryEntry.entry_date), 'EEE, MMM d')
-  const isPending = primaryEntry.pending_resolution
+  // NOTE: all hooks must run before any early return (rules-of-hooks). Initializers
+  // are null-safe so the hook order stays stable even when there is no entry; the
+  // `!primaryEntry` guard happens after every hook below.
+  const isPending = primaryEntry?.pending_resolution ?? false
 
   const [activeTab, setActiveTab] = useState<DrawerTab>(
     !isUnallocated ? 'edit' : isPending ? 'pending' : 'assign'
@@ -285,18 +284,24 @@ export function InlineDrawer({
   // Split form
   const [splitRows, setSplitRows] = useState([{ propertyId: '', hours: '' }, { propertyId: '', hours: '' }])
   const [splitReason, setSplitReason] = useState('')
-  const splitTotal = splitRows.reduce((s, r) => s + (parseFloat(r.hours) || 0), 0)
-  const splitRemaining = parseFloat((entryHours - splitTotal).toFixed(2))
 
   // Spread form
   const [spreadPropertyIds, setSpreadPropertyIds] = useState<string[]>([])
   const [spreadReason, setSpreadReason] = useState('')
 
   // Pending form
-  const [pendingNote, setPendingNote] = useState(primaryEntry.pending_note ?? '')
+  const [pendingNote, setPendingNote] = useState(primaryEntry?.pending_note ?? '')
 
   // Remove form
   const [removeReason, setRemoveReason] = useState('')
+
+  // Safe to bail now that every hook has been called unconditionally.
+  if (!primaryEntry) return null
+
+  const entryHours = primaryEntry.regular_hours + primaryEntry.ot_hours
+  const entryDate = format(parseISO(primaryEntry.entry_date), 'EEE, MMM d')
+  const splitTotal = splitRows.reduce((s, r) => s + (parseFloat(r.hours) || 0), 0)
+  const splitRemaining = parseFloat((entryHours - splitTotal).toFixed(2))
 
   const tabs: { id: DrawerTab; label: string }[] = isUnallocated
     ? [

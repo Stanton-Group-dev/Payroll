@@ -705,7 +705,7 @@ export default function PortfoliosPage() {
 
         {!propertyForm.billing_llc?.trim() && fallbackOwnerLLC && (
           <InfoBlock variant="default">
-            Billing fallback: this property will use portfolio owner LLC "{fallbackOwnerLLC}" when invoices are generated.
+            Billing fallback: this property will use portfolio owner LLC &ldquo;{fallbackOwnerLLC}&rdquo; when invoices are generated.
           </InfoBlock>
         )}
 
