@@ -21,12 +21,14 @@ import {
   Car,
   Receipt,
   Sparkles,
+  CircleDollarSign,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/payroll/useAuth'
 
 const navItems = [
   { href: '/payroll', label: 'Week Dashboard', icon: BarChart2, exact: true },
   { href: '/payroll/employees', label: 'Employees & Rates', icon: Users },
+  { href: '/payroll/rate-coverage', label: 'Rate Coverage', icon: CircleDollarSign },
   { href: '/payroll/import', label: 'Workyard Import', icon: Upload },
   { href: '/payroll/timesheets', label: 'Timesheet Adjustments', icon: ClipboardEdit },
   { href: '/payroll/expenses', label: 'Expenses', icon: Receipt },
