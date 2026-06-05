@@ -17,6 +17,7 @@ import { InlineDrawer } from './components/InlineDrawer'
 import { ManualAddPanel } from './components/ManualAddPanel'
 import { CarryForwardPanel } from './components/CarryForwardPanel'
 import { AdjustmentLog } from './components/AdjustmentLog'
+import { CommandBar } from '@/components/payroll/CommandBar'
 import type { PayrollEmployee, PayrollTimeEntry } from '@/lib/supabase/types'
 
 export default function TimesheetsPage() {
@@ -42,7 +43,7 @@ function TimesheetsPageContent() {
   const {
     allEntries, unallocatedEntries, pendingEntries, corrections,
     loading, reassign, addEntry, spread, removeEntry, setPending,
-    resolvePending, addCarryForward,
+    resolvePending, addCarryForward, refetch,
   } = useTimesheetAdjustments(selectedWeekId || null)
 
   const { employees } = usePayrollEmployees(false)
@@ -265,6 +266,7 @@ function TimesheetsPageContent() {
                 {/* Panels */}
                 {!isLocked && (
                   <div className="p-6 space-y-4">
+                    <CommandBar onExecuted={refetch} />
                     <ManualAddPanel
                       employees={employees}
                       properties={properties}
