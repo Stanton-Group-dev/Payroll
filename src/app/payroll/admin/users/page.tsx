@@ -11,16 +11,22 @@ import {
 import { format } from 'date-fns'
 
 const ROLE_LABELS: Record<UserRole, string> = {
+  superadmin: 'Super Admin',
   admin: 'Admin',
   manager: 'Manager',
   bookkeeper: 'Bookkeeper',
 }
 
 const ROLE_DESCRIPTIONS: Record<UserRole, string> = {
+  superadmin: 'Unrestricted apex access — all admin powers plus system-level controls (e.g. the command console)',
   admin: 'Full access — config, approvals, rate management, user admin',
   manager: 'Portfolio visibility, corrections, approvals, cost monitoring',
   bookkeeper: 'ADP export, upload ADP report, reconciliation view (read-only otherwise)',
 }
+
+// Roles that can be assigned through this UI. superadmin is intentionally
+// excluded — it is granted directly in the database, not via the invite form.
+const ASSIGNABLE_ROLES: UserRole[] = ['admin', 'manager', 'bookkeeper']
 
 const empty = { email: '', full_name: '', role: 'manager' as UserRole, portfolio_ids: [] as string[] }
 
@@ -83,6 +89,7 @@ export default function UsersPage() {
   }
 
   const roleBadgeColor = (role: UserRole) => {
+    if (role === 'superadmin') return 'bg-[var(--ink)] text-white'
     if (role === 'admin') return 'bg-[var(--primary)] text-white'
     if (role === 'manager') return 'bg-[var(--accent)]/20 text-[var(--accent)]'
     return 'bg-[var(--bg-section)] text-[var(--muted)]'
@@ -111,13 +118,13 @@ export default function UsersPage() {
         )}
 
         <div className="mb-6 grid grid-cols-3 gap-4">
-          {Object.entries(ROLE_DESCRIPTIONS).map(([role, desc]) => (
+          {ASSIGNABLE_ROLES.map((role) => (
             <div key={role} className="border border-[var(--border)] bg-white p-4">
               <div className="flex items-center gap-2 mb-1">
                 <ShieldCheck size={14} className="text-[var(--muted)]" />
-                <span className="font-medium text-sm text-[var(--ink)] capitalize">{ROLE_LABELS[role as UserRole]}</span>
+                <span className="font-medium text-sm text-[var(--ink)] capitalize">{ROLE_LABELS[role]}</span>
               </div>
-              <p className="text-xs text-[var(--muted)]">{desc}</p>
+              <p className="text-xs text-[var(--muted)]">{ROLE_DESCRIPTIONS[role]}</p>
             </div>
           ))}
         </div>

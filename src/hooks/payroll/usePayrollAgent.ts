@@ -30,12 +30,20 @@ export interface AgentProposal {
   preview: PlanPreview
 }
 
+/** 'report' = read-only Q&A (manager+); 'full' = read + write proposals (super-admin). */
+export type AgentMode = 'report' | 'full'
+
 /**
- * Drives the natural-language command bar: send a message, receive either a
- * clarifying reply or a proposed operation + preview, then confirm to execute.
- * Confirmation re-validates server-side; nothing is written until confirm().
+ * Drives the natural-language command bar / console: send a message, receive
+ * either a clarifying reply or a proposed operation + preview, then confirm to
+ * execute. Confirmation re-validates server-side; nothing is written until
+ * confirm(). In 'report' mode the server exposes no write tools, so proposals
+ * never appear.
  */
-export function usePayrollAgent(onExecuted?: () => void) {
+export function usePayrollAgent(
+  opts: { mode?: AgentMode; onExecuted?: () => void } = {}
+) {
+  const { mode = 'report', onExecuted } = opts
   const [messages, setMessages] = useState<ChatTurn[]>([])
   const [proposal, setProposal] = useState<AgentProposal | null>(null)
   const [thinking, setThinking] = useState(false)
@@ -55,7 +63,7 @@ export function usePayrollAgent(onExecuted?: () => void) {
         const res = await fetch('/api/payroll/agent', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: next }),
+          body: JSON.stringify({ messages: next, mode }),
         })
         const data = await res.json()
         if (!res.ok) throw new Error(data.error ?? 'Command failed')
@@ -69,7 +77,7 @@ export function usePayrollAgent(onExecuted?: () => void) {
         setThinking(false)
       }
     },
-    [messages, thinking]
+    [messages, thinking, mode]
   )
 
   const confirm = useCallback(async () => {

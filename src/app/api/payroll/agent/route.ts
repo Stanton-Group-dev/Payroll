@@ -1,6 +1,12 @@
 import { NextResponse } from 'next/server'
-import { buildOperationContext, UnauthenticatedError } from '@/lib/payroll/agent/context'
+import {
+  buildOperationContext,
+  assertRole,
+  UnauthenticatedError,
+  UnauthorizedError,
+} from '@/lib/payroll/agent/context'
 import { runAgent, AgentUnavailableError, type ChatTurn } from '@/lib/payroll/agent/run'
+import type { AgentMode } from '@/lib/payroll/agent/tools'
 
 export const runtime = 'nodejs'
 
@@ -8,9 +14,12 @@ export const runtime = 'nodejs'
  * Natural-language command endpoint. Accepts the conversation so far and returns
  * either a clarifying reply or a proposed operation + preview. NEVER writes —
  * confirmation goes to /api/payroll/agent/execute.
+ *
+ * mode 'report' (read-only) requires manager+; mode 'full' (read + write
+ * proposals) requires super-admin.
  */
 export async function POST(request: Request) {
-  let body: { messages?: ChatTurn[]; message?: string }
+  let body: { messages?: ChatTurn[]; message?: string; mode?: AgentMode }
   try {
     body = await request.json()
   } catch {
@@ -27,14 +36,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'No message provided' }, { status: 400 })
   }
 
+  const mode: AgentMode = body.mode === 'full' ? 'full' : 'report'
+
   try {
     const prompt = [...history].reverse().find((m) => m.role === 'user')?.content
     const ctx = await buildOperationContext('agent', prompt)
-    const result = await runAgent(ctx, history)
+    assertRole(ctx, mode === 'full' ? 'superadmin' : 'manager')
+    const result = await runAgent(ctx, history, mode)
     return NextResponse.json(result)
   } catch (err) {
     if (err instanceof UnauthenticatedError) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    }
+    if (err instanceof UnauthorizedError) {
+      return NextResponse.json({ error: err.message }, { status: 403 })
     }
     if (err instanceof AgentUnavailableError) {
       return NextResponse.json({ error: err.message }, { status: 503 })

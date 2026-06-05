@@ -13,6 +13,33 @@ export class UnauthenticatedError extends Error {
   }
 }
 
+export class UnauthorizedError extends Error {
+  constructor(message = 'You do not have access to this action') {
+    super(message)
+    this.name = 'UnauthorizedError'
+  }
+}
+
+/**
+ * Role hierarchy used to gate the console. superadmin ⊃ admin ⊃ manager.
+ * A null role is treated as 'manager' (see buildOperationContext / useAuth.ts).
+ */
+export function roleAtLeast(role: string, minimum: 'manager' | 'admin' | 'superadmin'): boolean {
+  const rank: Record<string, number> = { manager: 1, admin: 2, superadmin: 3 }
+  const have = rank[role] ?? 0 // unknown roles (e.g. bookkeeper) get no console access; null is mapped to 'manager' upstream
+  return have >= rank[minimum]
+}
+
+/** Throw UnauthorizedError unless the context's actor meets the minimum role. */
+export function assertRole(
+  ctx: OperationContext,
+  minimum: 'manager' | 'admin' | 'superadmin'
+): void {
+  if (!roleAtLeast(ctx.actor.role, minimum)) {
+    throw new UnauthorizedError(`This action requires ${minimum} access.`)
+  }
+}
+
 export async function buildOperationContext(
   source: OperationSource,
   agentPrompt?: string

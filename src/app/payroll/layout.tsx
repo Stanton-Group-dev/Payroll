@@ -20,6 +20,7 @@ import {
   SplitSquareVertical,
   Car,
   Receipt,
+  Sparkles,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/payroll/useAuth'
 
@@ -49,7 +50,7 @@ const adminItems = [
 
 export default function PayrollLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
-  const { profile, signOut } = useAuth()
+  const { profile, signOut, isManager } = useAuth()
 
   const isActive = (href: string, exact?: boolean) => {
     if (exact) return pathname === href
@@ -93,6 +94,20 @@ export default function PayrollLayout({ children }: { children: React.ReactNode 
 
           <div className="px-3 mt-4">
             <p className="text-xs text-white/40 uppercase tracking-widest px-2 mb-2">Intelligence</p>
+            {isManager && (
+              <Link
+                href="/payroll/console"
+                className={`flex items-center gap-2.5 px-2 py-2 text-sm transition-colors duration-200 mb-0.5 ${
+                  isActive('/payroll/console')
+                    ? 'bg-white/15 text-white font-medium'
+                    : 'text-white/60 hover:text-white hover:bg-white/8'
+                }`}
+              >
+                <Sparkles size={14} className="shrink-0" />
+                Console
+                {isActive('/payroll/console') && <ChevronRight size={12} className="ml-auto" />}
+              </Link>
+            )}
             {analyticsItems.map((item) => {
               const Icon = item.icon
               const active = isActive(item.href)

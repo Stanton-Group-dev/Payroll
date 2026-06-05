@@ -9,7 +9,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import type { OperationContext, PlanPreview } from '@/lib/payroll/operations/core'
 import { previewOperation } from '@/lib/payroll/operations/core'
 import { getOperation } from '@/lib/payroll/operations'
-import { buildTools, dispatchTool, systemPrompt } from './tools'
+import { buildTools, dispatchTool, systemPrompt, type AgentMode } from './tools'
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6'
 const MAX_TURNS = 6
@@ -38,13 +38,17 @@ export class AgentUnavailableError extends Error {
   }
 }
 
-export async function runAgent(ctx: OperationContext, history: ChatTurn[]): Promise<AgentResult> {
+export async function runAgent(
+  ctx: OperationContext,
+  history: ChatTurn[],
+  mode: AgentMode = 'full'
+): Promise<AgentResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) throw new AgentUnavailableError()
 
   const client = new Anthropic({ apiKey })
   const model = process.env.PAYROLL_AGENT_MODEL || DEFAULT_MODEL
-  const tools = buildTools() as Anthropic.Tool[]
+  const tools = buildTools(mode) as Anthropic.Tool[]
   const today = new Date()
 
   const messages: Anthropic.MessageParam[] = history.map((t) => ({
@@ -58,7 +62,7 @@ export async function runAgent(ctx: OperationContext, history: ChatTurn[]): Prom
     const resp = await client.messages.create({
       model,
       max_tokens: 1024,
-      system: systemPrompt(today),
+      system: systemPrompt(today, mode),
       tools,
       messages,
     })

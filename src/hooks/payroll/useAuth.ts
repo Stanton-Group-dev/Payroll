@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { User } from '@supabase/supabase-js'
 
-export type UserRole = 'admin' | 'manager' | 'bookkeeper'
+export type UserRole = 'superadmin' | 'admin' | 'manager' | 'bookkeeper'
 
 export interface AuthProfile {
   id: string
@@ -84,8 +84,10 @@ export function useAuth() {
     window.location.href = '/payroll/login'
   }
 
-  const isAdmin = profile?.role === 'admin'
-  const isManager = profile?.role === 'admin' || profile?.role === 'manager'
+  // superadmin is the apex role: it implies admin (and therefore manager) too.
+  const isSuperAdmin = profile?.role === 'superadmin'
+  const isAdmin = isSuperAdmin || profile?.role === 'admin'
+  const isManager = isAdmin || profile?.role === 'manager'
 
-  return { user, profile, loading, signOut, isAdmin, isManager }
+  return { user, profile, loading, signOut, isSuperAdmin, isAdmin, isManager }
 }

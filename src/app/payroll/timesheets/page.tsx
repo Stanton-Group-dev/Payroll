@@ -18,6 +18,7 @@ import { ManualAddPanel } from './components/ManualAddPanel'
 import { CarryForwardPanel } from './components/CarryForwardPanel'
 import { AdjustmentLog } from './components/AdjustmentLog'
 import { CommandBar } from '@/components/payroll/CommandBar'
+import { useAuth } from '@/hooks/payroll/useAuth'
 import type { PayrollEmployee, PayrollTimeEntry } from '@/lib/supabase/types'
 
 export default function TimesheetsPage() {
@@ -30,6 +31,7 @@ export default function TimesheetsPage() {
 
 function TimesheetsPageContent() {
   const { weeks } = usePayrollWeeks()
+  const { isSuperAdmin } = useAuth()
   const searchParams = useSearchParams()
   const [selectedWeekId, setSelectedWeekId] = useState('')
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null)
@@ -266,7 +268,7 @@ function TimesheetsPageContent() {
                 {/* Panels */}
                 {!isLocked && (
                   <div className="p-6 space-y-4">
-                    <CommandBar onExecuted={refetch} />
+                    {isSuperAdmin && <CommandBar onExecuted={refetch} />}
                     <ManualAddPanel
                       employees={employees}
                       properties={properties}

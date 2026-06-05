@@ -1,5 +1,10 @@
 import { NextResponse } from 'next/server'
-import { buildOperationContext, UnauthenticatedError } from '@/lib/payroll/agent/context'
+import {
+  buildOperationContext,
+  assertRole,
+  UnauthenticatedError,
+  UnauthorizedError,
+} from '@/lib/payroll/agent/context'
 import { getOperation } from '@/lib/payroll/operations'
 import {
   executeOperation,
@@ -13,6 +18,9 @@ export const runtime = 'nodejs'
  * Confirm-and-execute endpoint. Takes an operation name + the validated input
  * that was previewed, then RE-validates and RE-plans server-side (never trusting
  * a client-supplied preview) before committing and writing the audit row.
+ *
+ * Natural-language writes are super-admin only. (Managers' structured timesheet
+ * corrections go through /api/payroll/operations/execute, not this route.)
  */
 export async function POST(request: Request) {
   let body: { operation?: string; input?: unknown; agentPrompt?: string }
@@ -32,11 +40,15 @@ export async function POST(request: Request) {
 
   try {
     const ctx = await buildOperationContext('agent', body.agentPrompt)
+    assertRole(ctx, 'superadmin')
     const { preview, result } = await executeOperation(ctx, op, body.input)
     return NextResponse.json({ ok: true, preview, result })
   } catch (err) {
     if (err instanceof UnauthenticatedError) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    }
+    if (err instanceof UnauthorizedError) {
+      return NextResponse.json({ error: err.message }, { status: 403 })
     }
     if (err instanceof OperationValidationError) {
       return NextResponse.json({ error: err.message, issues: err.issues }, { status: 400 })

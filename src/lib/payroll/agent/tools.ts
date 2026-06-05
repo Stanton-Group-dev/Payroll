@@ -15,6 +15,7 @@ import {
   candidateSummary,
 } from '@/lib/payroll/resolve/entities'
 import { parseRelativeDate, resolveWeekForDate } from '@/lib/payroll/resolve/dates'
+import { resolveWeeks, queryPay, queryTimeEntries } from './queries'
 
 export interface ToolDef {
   name: string
@@ -26,12 +27,18 @@ export type ToolOutcome =
   | { kind: 'tool_result'; content: string }
   | { kind: 'proposal'; operation: string; input: unknown; assumptions?: string }
 
-export function buildTools(): ToolDef[] {
+/**
+ * 'report' mode exposes only read/resolve tools (no writes). 'full' mode adds
+ * the terminal propose_operation write tool. The console picks the mode by role.
+ */
+export type AgentMode = 'report' | 'full'
+
+export function buildTools(mode: AgentMode = 'full'): ToolDef[] {
   const opList = listOperations()
     .map((o) => `- ${o.name}: ${o.description}`)
     .join('\n')
 
-  return [
+  const readTools: ToolDef[] = [
     {
       name: 'resolve_employee',
       description: 'Resolve a typed employee name (e.g. "stan") to an employee id.',
@@ -101,52 +108,114 @@ export function buildTools(): ToolDef[] {
       },
     },
     {
-      name: 'propose_operation',
+      name: 'resolve_date_range',
       description:
-        `Propose a payroll write to show the user for confirmation. Do NOT call until all names are resolved to ids and any date to ISO. Available operations:\n${opList}`,
+        'Resolve a span of payroll weeks for reporting. Use lastNWeeks for "last/past N weeks", or fromPhrase/toPhrase for an explicit range ("from march 1 to april 1"). Returns the weeks plus the overall fromDate/toDate (ISO) to pass to query_time_entries.',
       input_schema: {
         type: 'object',
         properties: {
-          operation: { type: 'string', description: 'Operation name, e.g. time_entry.add' },
-          input: {
-            type: 'object',
-            description:
-              'Fully-resolved operation input. Shapes by operation:\n' +
-              '- time_entry.add: { employeeId, date (ISO), hours, hourType?, allocation: {mode:"property",propertyId} | {mode:"portfolio",portfolioId} | {mode:"unallocated"}, reason? }\n' +
-              '- employee.add: { name, type:"hourly"|"salaried"|"contractor", hourlyRate? (hourly/contractor), weeklyRate? (salaried), trade?, workyardId?, otAllowed?, payTax?, wc?, isManagement?, reason? }\n' +
-              '- employee.update: { employeeId, and any of name/type/hourlyRate/weeklyRate/trade/workyardId/otAllowed/payTax/wc/isManagement, reason? }\n' +
-              '- employee.deactivate / employee.reactivate: { employeeId, reason? }\n' +
-              '- external_project.add: { name, clientName, billedTo, notes?, workyardCustomerNames?, isActive?, reason? }\n' +
-              '- external_project.update: { projectId, and any of name/clientName/billedTo/notes/workyardCustomerNames, reason? }\n' +
-              '- external_project.deactivate / external_project.reactivate: { projectId, reason? }',
-          },
-          assumptions: {
-            type: 'string',
-            description: 'Any assumptions made (e.g. which week, even-vs-unit split) the user should verify.',
-          },
+          lastNWeeks: { type: 'number', description: 'e.g. 5 for "the last 5 weeks"' },
+          fromPhrase: { type: 'string', description: 'Natural-language start, e.g. "march 1"' },
+          toPhrase: { type: 'string', description: 'Natural-language end, e.g. "today"' },
         },
-        required: ['operation', 'input'],
+      },
+    },
+    {
+      name: 'query_pay',
+      description:
+        'Report how much an employee was paid (gross pay) over a span of weeks, using the canonical payroll math. Pass employeeId (from resolve_employee) and a span via lastNWeeks OR fromDate/toDate (ISO). Omit employeeId to get per-week totals across everyone. Returns a per-week breakdown and the total.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          employeeId: { type: 'string' },
+          lastNWeeks: { type: 'number' },
+          fromDate: { type: 'string', description: 'ISO yyyy-MM-dd' },
+          toDate: { type: 'string', description: 'ISO yyyy-MM-dd' },
+        },
+      },
+    },
+    {
+      name: 'query_time_entries',
+      description:
+        'Report hours worked. Filter by employeeId, propertyId (answers "was he at <property>"), and a date window fromDate/toDate (ISO). status:"active" (default) counts current hours; status:"removed" counts knocked-off / soft-deleted hours ("how many hours did we knock off"); status:"all" counts both. Returns the matching entries and the summed hours.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          employeeId: { type: 'string' },
+          propertyId: { type: 'string' },
+          fromDate: { type: 'string', description: 'ISO yyyy-MM-dd' },
+          toDate: { type: 'string', description: 'ISO yyyy-MM-dd' },
+          status: { type: 'string', enum: ['active', 'removed', 'all'] },
+        },
       },
     },
   ]
+
+  if (mode === 'report') return readTools
+
+  const proposeOperation: ToolDef = {
+    name: 'propose_operation',
+    description:
+      `Propose a payroll write to show the user for confirmation. Do NOT call until all names are resolved to ids and any date to ISO. Available operations:\n${opList}`,
+    input_schema: {
+      type: 'object',
+      properties: {
+        operation: { type: 'string', description: 'Operation name, e.g. time_entry.add' },
+        input: {
+          type: 'object',
+          description:
+            'Fully-resolved operation input. Shapes by operation:\n' +
+            '- time_entry.add: { employeeId, date (ISO), hours, hourType?, allocation: {mode:"property",propertyId} | {mode:"portfolio",portfolioId} | {mode:"unallocated"}, reason? }\n' +
+            '- employee.add: { name, type:"hourly"|"salaried"|"contractor", hourlyRate? (hourly/contractor), weeklyRate? (salaried), trade?, workyardId?, otAllowed?, payTax?, wc?, isManagement?, reason? }\n' +
+            '- employee.update: { employeeId, and any of name/type/hourlyRate/weeklyRate/trade/workyardId/otAllowed/payTax/wc/isManagement, reason? }\n' +
+            '- employee.deactivate / employee.reactivate: { employeeId, reason? }\n' +
+            '- external_project.add: { name, clientName, billedTo, notes?, workyardCustomerNames?, isActive?, reason? }\n' +
+            '- external_project.update: { projectId, and any of name/clientName/billedTo/notes/workyardCustomerNames, reason? }\n' +
+            '- external_project.deactivate / external_project.reactivate: { projectId, reason? }',
+        },
+        assumptions: {
+          type: 'string',
+          description: 'Any assumptions made (e.g. which week, even-vs-unit split) the user should verify.',
+        },
+      },
+      required: ['operation', 'input'],
+    },
+  }
+
+  return [...readTools, proposeOperation]
 }
 
-export function systemPrompt(today: Date): string {
+export function systemPrompt(today: Date, mode: AgentMode = 'full'): string {
   const iso = today.toISOString().slice(0, 10)
-  return [
-    'You are the payroll command assistant for Stanton Management.',
+  const common = [
+    'You are the payroll assistant for Stanton Management.',
     `Today is ${iso}. Payroll weeks run Sunday through Saturday.`,
     '',
-    'Your job: turn a manager\'s plain-language request into ONE proposed payroll operation.',
-    'Rules:',
-    '- Never invent ids. Use resolve_* tools to turn names and dates into ids/ISO dates.',
-    '- If a resolver returns status "ambiguous" or "none", ask the user a brief clarifying question instead of guessing.',
+    'Reading & reporting (always available):',
+    '- Never invent ids. Use resolve_employee / resolve_property / resolve_portfolio to turn names into ids, and resolve_date / resolve_date_range to turn phrases into ISO dates and payroll weeks.',
+    '- If a resolver returns status "ambiguous" or "none", ask a brief clarifying question instead of guessing.',
+    '- For "how much was X paid": resolve_employee, then query_pay with that employeeId and the span (lastNWeeks, or fromDate/toDate). Report the per-week amounts and the total. Use only the numbers the tools return — never estimate.',
+    '- For "how many hours" / "was X at <property>": use query_time_entries. Resolve the property first when one is named, and a date window with resolve_date_range when a span is implied. "How many hours did we knock off" means status:"removed".',
+    '- Format money as US dollars and keep replies tight; a short summary plus a small table is ideal.',
+  ]
+
+  if (mode === 'report') {
+    return [
+      ...common,
+      '',
+      'You are in READ-ONLY mode: you answer questions and produce reports to help managers respond to employees. You CANNOT change any data and have no write tools. If asked to add, edit, or remove anything, explain that changes must be made by a super-admin.',
+    ].join('\n')
+  }
+
+  return [
+    ...common,
+    '',
+    'Writing (super-admin):',
     '- "across the <X> portfolio" means allocation mode "portfolio" (hours are spread, unit-weighted, across that portfolio\'s properties).',
     '- A single named property means mode "property". If no location is given, ask; do not silently leave it unallocated unless the user says "unallocated".',
     '- For employee changes (add/update/deactivate/reactivate): adding a new hire needs no resolve (it is a new name); for changes to an existing person, use resolve_employee first (pass includeInactive:true when reactivating). New hires need a type and the matching rate (hourly/contractor → hourlyRate, salaried → weeklyRate); if the type or rate is missing, ask.',
     '- For external projects (non-portfolio client work like "Zimmerman"): adding is a new name (no resolve); to change/deactivate/reactivate an existing one, use resolve_external_project first (includeInactive:true when reactivating). Adding one needs name, clientName, and billedTo; if billedTo is missing, ask who receives the invoice.',
-    '- Once everything is resolved, call propose_operation exactly once. Do not execute anything yourself — the user confirms the preview.',
-    '- Keep any text replies short.',
+    '- To make a change, call propose_operation exactly once after everything is resolved. Do not execute anything yourself — the user confirms the preview.',
   ].join('\n')
 }
 
@@ -224,6 +293,50 @@ export async function dispatchTool(
       const { data, error } = await q
       if (error) return ok({ status: 'error', message: error.message })
       return ok({ status: 'ok', entries: data ?? [] })
+    }
+    case 'resolve_date_range': {
+      const opts: { lastNWeeks?: number; fromDate?: string; toDate?: string } = {}
+      if (typeof input.lastNWeeks === 'number') opts.lastNWeeks = input.lastNWeeks
+      if (input.fromPhrase) {
+        const p = parseRelativeDate(String(input.fromPhrase))
+        if (p) opts.fromDate = p.iso
+      }
+      if (input.toPhrase) {
+        const p = parseRelativeDate(String(input.toPhrase))
+        if (p) opts.toDate = p.iso
+      }
+      const weeks = await resolveWeeks(ctx, opts)
+      if (weeks.length === 0) return ok({ status: 'none', message: 'No payroll weeks found in that span.' })
+      return ok({
+        status: 'ok',
+        weeks,
+        fromDate: weeks[0].week_start,
+        toDate: weeks[weeks.length - 1].week_end,
+      })
+    }
+    case 'query_pay': {
+      const weeks = await resolveWeeks(ctx, {
+        lastNWeeks: typeof input.lastNWeeks === 'number' ? input.lastNWeeks : undefined,
+        fromDate: input.fromDate ? String(input.fromDate) : undefined,
+        toDate: input.toDate ? String(input.toDate) : undefined,
+      })
+      if (weeks.length === 0) return ok({ status: 'none', message: 'No payroll weeks found in that span.' })
+      const report = await queryPay(ctx, {
+        employeeId: input.employeeId ? String(input.employeeId) : undefined,
+        weeks,
+      })
+      return ok({ status: 'ok', ...report })
+    }
+    case 'query_time_entries': {
+      const report = await queryTimeEntries(ctx, {
+        employeeId: input.employeeId ? String(input.employeeId) : undefined,
+        propertyId: input.propertyId ? String(input.propertyId) : undefined,
+        fromDate: input.fromDate ? String(input.fromDate) : undefined,
+        toDate: input.toDate ? String(input.toDate) : undefined,
+        status:
+          input.status === 'removed' || input.status === 'all' ? input.status : 'active',
+      })
+      return ok({ ...report, status: 'ok' })
     }
     case 'propose_operation': {
       return {

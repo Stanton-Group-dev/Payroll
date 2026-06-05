@@ -15,7 +15,7 @@ import { usePayrollAgent } from '@/hooks/payroll/usePayrollAgent'
  */
 export function CommandBar({ onExecuted }: { onExecuted?: () => void }) {
   const { messages, proposal, thinking, executing, error, send, confirm, cancel } =
-    usePayrollAgent(onExecuted)
+    usePayrollAgent({ mode: 'full', onExecuted })
   const [text, setText] = useState('')
   const logRef = useRef<HTMLDivElement>(null)
 
