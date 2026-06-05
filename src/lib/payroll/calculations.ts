@@ -249,3 +249,163 @@ function round2(n: number): number {
 export function formatCurrency(n: number): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n)
 }
+
+/* ------------------------------------------------------------------ */
+/* Week-over-week comparison                                           */
+/* ------------------------------------------------------------------ */
+
+export interface Delta {
+  current: number
+  prior: number
+  delta: number
+  /** Percent change vs prior; null when prior is 0 (undefined growth). */
+  pct: number | null
+}
+
+export interface ComparisonRow {
+  key: string
+  label: string
+  current: number
+  prior: number
+  delta: number
+  pct: number | null
+  /** 'new' = on current payroll but not prior; 'dropped' = prior but not current. */
+  status: 'new' | 'dropped' | 'changed' | 'same'
+}
+
+export interface PayrollComparison {
+  currentLabel: string
+  priorLabel: string
+  totals: {
+    gross_pay: Delta
+    payroll_tax: Delta
+    workers_comp: Delta
+    mgmt_fee: Delta
+    required_prefund: Delta
+    total_hours: Delta
+  }
+  byEmployee: ComparisonRow[]
+  byProperty: ComparisonRow[]
+  /** Plain-language highlights, suitable for an agent to read back. */
+  notable: string[]
+}
+
+function delta(current: number, prior: number): Delta {
+  const d = round2(current - prior)
+  return {
+    current: round2(current),
+    prior: round2(prior),
+    delta: d,
+    pct: prior !== 0 ? round2((d / Math.abs(prior)) * 100) : null,
+  }
+}
+
+function rowStatus(current: number, prior: number): ComparisonRow['status'] {
+  if (prior === 0 && current !== 0) return 'new'
+  if (current === 0 && prior !== 0) return 'dropped'
+  if (round2(current) !== round2(prior)) return 'changed'
+  return 'same'
+}
+
+function totalHours(r: PayrollCalculationResult): number {
+  return r.employee_summaries.reduce(
+    (s, e) => s + e.regular_hours + e.ot_hours + e.pto_hours,
+    0
+  )
+}
+
+/**
+ * Diff a freshly-run payroll result against the prior week's. Pure: callers run
+ * calculatePayroll() for each week and pass the two results. Produces total,
+ * per-employee, and per-property deltas plus human-readable highlights.
+ */
+export function comparePayroll(
+  current: PayrollCalculationResult,
+  prior: PayrollCalculationResult,
+  labels: { current: string; prior: string }
+): PayrollComparison {
+  // Per-employee gross, keyed by id across both weeks.
+  const empCur = new Map(current.employee_summaries.map((e) => [e.employee_id, e]))
+  const empPri = new Map(prior.employee_summaries.map((e) => [e.employee_id, e]))
+  const empKeys = new Set([...empCur.keys(), ...empPri.keys()])
+  const byEmployee: ComparisonRow[] = [...empKeys]
+    .map((id) => {
+      const c = empCur.get(id)
+      const p = empPri.get(id)
+      const cur = c?.gross_pay ?? 0
+      const pri = p?.gross_pay ?? 0
+      return {
+        key: id,
+        label: c?.employee_name ?? p?.employee_name ?? id,
+        current: round2(cur),
+        prior: round2(pri),
+        delta: round2(cur - pri),
+        pct: pri !== 0 ? round2(((cur - pri) / Math.abs(pri)) * 100) : null,
+        status: rowStatus(cur, pri),
+      }
+    })
+    .filter((r) => r.current !== 0 || r.prior !== 0)
+    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+
+  // Per-property total cost, keyed by id across both weeks.
+  const propCur = new Map(current.property_costs.map((p) => [p.property_id, p]))
+  const propPri = new Map(prior.property_costs.map((p) => [p.property_id, p]))
+  const propKeys = new Set([...propCur.keys(), ...propPri.keys()])
+  const byProperty: ComparisonRow[] = [...propKeys]
+    .map((id) => {
+      const c = propCur.get(id)
+      const p = propPri.get(id)
+      const cur = c?.total_cost ?? 0
+      const pri = p?.total_cost ?? 0
+      return {
+        key: id,
+        label: c ? `${c.property_code} ${c.property_name}` : p ? `${p.property_code} ${p.property_name}` : id,
+        current: round2(cur),
+        prior: round2(pri),
+        delta: round2(cur - pri),
+        pct: pri !== 0 ? round2(((cur - pri) / Math.abs(pri)) * 100) : null,
+        status: rowStatus(cur, pri),
+      }
+    })
+    .filter((r) => r.current !== 0 || r.prior !== 0)
+    .sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
+
+  const totals = {
+    gross_pay: delta(current.total_gross_pay, prior.total_gross_pay),
+    payroll_tax: delta(current.total_payroll_tax, prior.total_payroll_tax),
+    workers_comp: delta(current.total_workers_comp, prior.total_workers_comp),
+    mgmt_fee: delta(current.total_mgmt_fee, prior.total_mgmt_fee),
+    required_prefund: delta(current.required_prefund, prior.required_prefund),
+    total_hours: delta(totalHours(current), totalHours(prior)),
+  }
+
+  const notable: string[] = []
+  const g = totals.gross_pay
+  const dir = g.delta > 0 ? 'up' : g.delta < 0 ? 'down' : 'flat'
+  if (dir === 'flat') {
+    notable.push(`Gross pay unchanged at ${formatCurrency(g.current)}.`)
+  } else {
+    notable.push(
+      `Gross pay ${dir} ${formatCurrency(Math.abs(g.delta))}${g.pct !== null ? ` (${g.pct > 0 ? '+' : ''}${g.pct}%)` : ''} — ${formatCurrency(g.prior)} → ${formatCurrency(g.current)}.`
+    )
+  }
+  const added = byEmployee.filter((r) => r.status === 'new')
+  const dropped = byEmployee.filter((r) => r.status === 'dropped')
+  if (added.length) notable.push(`New on payroll: ${added.map((r) => r.label).join(', ')}.`)
+  if (dropped.length) notable.push(`Not paid this week (were last week): ${dropped.map((r) => r.label).join(', ')}.`)
+  const biggest = byEmployee.find((r) => r.status === 'changed')
+  if (biggest) {
+    notable.push(
+      `Largest swing: ${biggest.label} ${biggest.delta > 0 ? '+' : ''}${formatCurrency(biggest.delta)}.`
+    )
+  }
+
+  return {
+    currentLabel: labels.current,
+    priorLabel: labels.prior,
+    totals,
+    byEmployee,
+    byProperty,
+    notable,
+  }
+}

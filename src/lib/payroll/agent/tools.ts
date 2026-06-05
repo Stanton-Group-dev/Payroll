@@ -15,7 +15,7 @@ import {
   candidateSummary,
 } from '@/lib/payroll/resolve/entities'
 import { parseRelativeDate, resolveWeekForDate } from '@/lib/payroll/resolve/dates'
-import { resolveWeeks, queryPay, queryTimeEntries } from './queries'
+import { resolveWeeks, queryPay, queryTimeEntries, queryPayrollComparison } from './queries'
 
 export interface ToolDef {
   name: string
@@ -149,6 +149,18 @@ export function buildTools(mode: AgentMode = 'full'): ToolDef[] {
         },
       },
     },
+    {
+      name: 'compare_payroll',
+      description:
+        'Run payroll for a week and compare it to the prior week. Identify the week with weekId, or with a date inside it via the `date` phrase ("this week", "wednesday of last week", "2026-05-27"). Returns total deltas (gross pay, taxes, workers comp, mgmt fee, prefund, hours), per-employee and per-property changes, and plain-language highlights. Use this for "run payroll and compare to last week".',
+      input_schema: {
+        type: 'object',
+        properties: {
+          weekId: { type: 'string' },
+          date: { type: 'string', description: 'A natural-language date or ISO date inside the target week.' },
+        },
+      },
+    },
   ]
 
   if (mode === 'report') return readTools
@@ -196,6 +208,7 @@ export function systemPrompt(today: Date, mode: AgentMode = 'full'): string {
     '- If a resolver returns status "ambiguous" or "none", ask a brief clarifying question instead of guessing.',
     '- For "how much was X paid": resolve_employee, then query_pay with that employeeId and the span (lastNWeeks, or fromDate/toDate). Report the per-week amounts and the total. Use only the numbers the tools return — never estimate.',
     '- For "how many hours" / "was X at <property>": use query_time_entries. Resolve the property first when one is named, and a date window with resolve_date_range when a span is implied. "How many hours did we knock off" means status:"removed".',
+    '- For "run payroll and compare to last week" (or any week-over-week payroll question): use compare_payroll with a `date` inside the target week (e.g. "this week", "last week") or a weekId. Lead with the gross-pay delta and the notable highlights, then offer the per-employee breakdown.',
     '- Format money as US dollars and keep replies tight; a short summary plus a small table is ideal.',
   ]
 
@@ -337,6 +350,17 @@ export async function dispatchTool(
           input.status === 'removed' || input.status === 'all' ? input.status : 'active',
       })
       return ok({ ...report, status: 'ok' })
+    }
+    case 'compare_payroll': {
+      try {
+        const report = await queryPayrollComparison(ctx, {
+          weekId: input.weekId ? String(input.weekId) : undefined,
+          date: input.date ? String(input.date) : undefined,
+        })
+        return ok({ status: 'ok', ...report })
+      } catch (err) {
+        return ok({ status: 'error', message: err instanceof Error ? err.message : 'comparison failed' })
+      }
     }
     case 'propose_operation': {
       return {

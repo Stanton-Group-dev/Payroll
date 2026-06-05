@@ -9,13 +9,21 @@
  * — the agent only narrates the numbers these functions return.
  */
 import type { OperationContext } from '@/lib/payroll/operations/core'
-import { calculatePayroll, resolveRateAsOf } from '@/lib/payroll/calculations'
+import {
+  calculatePayroll,
+  resolveRateAsOf,
+  comparePayroll,
+  type PayrollCalculationResult,
+  type PayrollComparison,
+} from '@/lib/payroll/calculations'
+import { parseRelativeDate, resolveWeekForDate } from '@/lib/payroll/resolve/dates'
 import type {
   PayrollEmployee,
   PayrollEmployeeRate,
   PayrollTimeEntry,
   PayrollAdjustment,
   PayrollManagementFeeConfig,
+  Property,
 } from '@/lib/supabase/types'
 
 export interface ReportWeek {
@@ -297,4 +305,115 @@ function round<T extends Record<string, number>>(obj: T): T {
   const out = {} as T
   for (const k of Object.keys(obj) as (keyof T)[]) out[k] = round2(obj[k]) as T[keyof T]
   return out
+}
+
+/* ------------------------------------------------------------------ */
+/* Run payroll for a week and compare it to the prior week            */
+/* ------------------------------------------------------------------ */
+
+const EMPTY_RESULT: PayrollCalculationResult = {
+  employee_summaries: [],
+  property_costs: [],
+  total_gross_pay: 0,
+  total_payroll_tax: 0,
+  total_workers_comp: 0,
+  total_mgmt_fee: 0,
+  required_prefund: 0,
+}
+
+/** Run the canonical payroll engine for one week (excludes flagged/inactive entries, like the review screen). */
+async function runWeekResult(
+  ctx: OperationContext,
+  week: ReportWeek,
+  employees: PayrollEmployee[],
+  rates: PayrollEmployeeRate[],
+  feeConfigs: PayrollManagementFeeConfig[],
+  properties: Property[]
+): Promise<PayrollCalculationResult> {
+  const [{ data: entryData }, { data: adjData }] = await Promise.all([
+    ctx.supabase
+      .from('payroll_time_entries')
+      .select('id, employee_id, property_id, entry_date, regular_hours, ot_hours, pto_hours, is_flagged, is_active')
+      .eq('payroll_week_id', week.id)
+      .eq('is_active', true)
+      .eq('is_flagged', false),
+    ctx.supabase
+      .from('payroll_adjustments')
+      .select('id, employee_id, type, amount')
+      .eq('payroll_week_id', week.id),
+  ])
+  const entries = (entryData ?? []) as PayrollTimeEntry[]
+  const adjustments = (adjData ?? []) as PayrollAdjustment[]
+  // Use the rate that was in force for this week so historical pay is accurate.
+  const employeesForWeek = employees.map((e) => ({
+    ...e,
+    hourly_rate: resolveRateAsOf(e.id, week.week_start, rates, e.hourly_rate ?? 0),
+  }))
+  return calculatePayroll(employeesForWeek, entries, adjustments, feeConfigs, properties)
+}
+
+export interface PayrollComparisonReport extends PayrollComparison {
+  hasPrior: boolean
+}
+
+/**
+ * Run payroll for a target week (by id or by a date inside it) and compare it to
+ * the immediately-preceding payroll week. Uses the same engine as the review
+ * screen, so the figures match an actual payroll run.
+ */
+export async function queryPayrollComparison(
+  ctx: OperationContext,
+  opts: { weekId?: string; date?: string }
+): Promise<PayrollComparisonReport> {
+  const sel = 'id, week_start, week_end, status'
+
+  // Resolve the target week from an id or a date phrase.
+  let target: ReportWeek | null = null
+  if (opts.weekId) {
+    const { data } = await ctx.supabase.from('payroll_weeks').select(sel).eq('id', opts.weekId).maybeSingle()
+    target = (data as ReportWeek | null) ?? null
+  } else if (opts.date) {
+    const parsed = parseRelativeDate(opts.date)
+    if (!parsed) throw new Error(`Could not parse the date "${opts.date}".`)
+    const wk = await resolveWeekForDate(ctx, parsed.iso)
+    if (wk) target = { id: wk.id, week_start: wk.week_start, week_end: wk.week_end, status: wk.status }
+  }
+  if (!target) throw new Error('No payroll week matched. Specify a week or a date inside one.')
+
+  // Prior week = the most recent week starting before the target.
+  const { data: priorData } = await ctx.supabase
+    .from('payroll_weeks')
+    .select(sel)
+    .lt('week_start', target.week_start)
+    .order('week_start', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  const prior = (priorData as ReportWeek | null) ?? null
+
+  // Shared reference data, loaded once for both weeks.
+  const [{ data: empData }, { data: rateData }, { data: feeData }, { data: propData }] = await Promise.all([
+    ctx.supabase.from('payroll_employees').select('id, name, type, hourly_rate, weekly_rate, pay_tax, wc').eq('is_active', true),
+    ctx.supabase.from('payroll_employee_rates').select('id, employee_id, rate, effective_date'),
+    ctx.supabase.from('payroll_management_fee_config').select('id, rate_pct, portfolio_id, effective_date'),
+    ctx.supabase
+      .from('properties')
+      .select('id, appfolio_property_id, code, name, total_units, portfolio_id, address, billing_llc, is_active')
+      .eq('is_active', true),
+  ])
+  const employees = (empData ?? []) as PayrollEmployee[]
+  const rates = (rateData ?? []) as PayrollEmployeeRate[]
+  const feeConfigs = (feeData ?? []) as PayrollManagementFeeConfig[]
+  const properties = (propData ?? []) as Property[]
+
+  const currentResult = await runWeekResult(ctx, target, employees, rates, feeConfigs, properties)
+  const priorResult = prior
+    ? await runWeekResult(ctx, prior, employees, rates, feeConfigs, properties)
+    : EMPTY_RESULT
+
+  const comparison = comparePayroll(currentResult, priorResult, {
+    current: `Week of ${target.week_start}`,
+    prior: prior ? `Week of ${prior.week_start}` : 'no prior week',
+  })
+  if (!prior) comparison.notable.unshift('No prior payroll week exists — nothing to compare against.')
+  return { ...comparison, hasPrior: !!prior }
 }

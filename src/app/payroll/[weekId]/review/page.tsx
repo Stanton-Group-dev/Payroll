@@ -6,6 +6,7 @@ import { DollarSign, Lock } from 'lucide-react'
 import { usePayrollWeekReview } from '@/hooks/payroll/usePayrollWeekReview'
 import { PageHeader, FormButton, InfoBlock, StatusBadge } from '@/components/form'
 import { calculatePayroll, resolveRateAsOf, formatCurrency } from '@/lib/payroll/calculations'
+import { PayrollComparisonPanel } from '@/components/payroll/PayrollComparisonPanel'
 
 export default function WeekReviewPage({ params }: { params: Promise<{ weekId: string }> }) {
   const { weekId } = use(params)
@@ -97,6 +98,9 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
                 ADP pulls from bank before LLC transfers arrive — fund this amount before submitting to ADP.
               </p>
             </div>
+
+            {/* Week-over-week comparison */}
+            <PayrollComparisonPanel weekId={weekId} />
 
             {/* Employee pay summary */}
             <div>
