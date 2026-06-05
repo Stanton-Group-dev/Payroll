@@ -50,6 +50,7 @@ export interface MockWorkyardEmployee {
   status: string
   title: string | null
   hourly_rate: number | null
+  pay_type: string | null
 }
 
 /** Mock of Workyard's employee roster (with pay rate) for the rate-sync flow. */
@@ -65,6 +66,7 @@ export function generateMockEmployees(): MockWorkyardEmployee[] {
       status: 'active',
       title: 'Maintenance Technician',
       hourly_rate: w.hourlyRate,
+      pay_type: 'hourly',
     }
   })
 }

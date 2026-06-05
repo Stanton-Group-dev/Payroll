@@ -22,6 +22,7 @@ interface WYEmployeeBasic {
   status: string
   title: string | null
   hourly_rate: number | null
+  pay_type: string | null
 }
 
 interface SyncRow {
@@ -31,6 +32,7 @@ interface SyncRow {
   matchedEmployeeId: string
   autoMatched: boolean
   wyRate: number | null
+  wyPayType: string | null
 }
 
 const DEPARTMENTS = ['Acquisitions', 'Asset Management', 'Collections', 'Maintenance', 'Leasing', 'Administration']
@@ -129,6 +131,7 @@ export default function EmployeesPage() {
           matchedEmployeeId: matched?.id ?? '',
           autoMatched: !!matched,
           wyRate: wy.hourly_rate ?? null,
+          wyPayType: wy.pay_type ?? null,
         }
       })
       setSyncRows(rows)
@@ -324,8 +327,17 @@ export default function EmployeesPage() {
                           {row.wyName}
                         </td>
                         <td className="px-3 py-1.5 font-mono">{row.wyId}</td>
-                        <td className="px-3 py-1.5 text-right font-medium">
-                          {row.wyRate != null ? `$${row.wyRate.toFixed(2)}/hr` : <span className="text-[var(--muted)]">—</span>}
+                        <td className="px-3 py-1.5 text-right font-medium whitespace-nowrap">
+                          {row.wyRate != null ? (
+                            <>
+                              ${row.wyRate.toFixed(2)}/hr
+                              {row.wyPayType && row.wyPayType !== 'hourly' && (
+                                <span className="ml-1 text-[10px] uppercase text-[var(--warning)]">{row.wyPayType}</span>
+                              )}
+                            </>
+                          ) : (
+                            <span className="text-[var(--muted)]">—</span>
+                          )}
                         </td>
                         <td className="px-3 py-1.5">
                           <select
