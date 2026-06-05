@@ -7,6 +7,7 @@ import { usePayrollWeekReview } from '@/hooks/payroll/usePayrollWeekReview'
 import { PageHeader, FormButton, InfoBlock, StatusBadge } from '@/components/form'
 import { calculatePayroll, resolveRateAsOf, formatCurrency } from '@/lib/payroll/calculations'
 import { PayrollComparisonPanel } from '@/components/payroll/PayrollComparisonPanel'
+import { ManualReconcilePanel } from '@/components/payroll/ManualReconcilePanel'
 
 export default function WeekReviewPage({ params }: { params: Promise<{ weekId: string }> }) {
   const { weekId } = use(params)
@@ -101,6 +102,9 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
 
             {/* Week-over-week comparison */}
             <PayrollComparisonPanel weekId={weekId} />
+
+            {/* Reconcile against the manual (Excel) payroll */}
+            <ManualReconcilePanel result={result} />
 
             {/* Employee pay summary */}
             <div>
