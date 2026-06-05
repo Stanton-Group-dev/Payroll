@@ -12,19 +12,23 @@ import type { WorkyardRow } from '@/lib/payroll/csv-parser'
  * preview auto-matches employees and properties.
  */
 
-/** Workyard team-member IDs that match seeded payroll_employees.workyard_id. */
-const MOCK_WORKERS: { workyardId: string; name: string }[] = [
-  { workyardId: '122736', name: 'Angel Salazar' },
-  { workyardId: '127502', name: 'Darwin Montesdeoca' },
-  { workyardId: '205764', name: 'Javier Rivera' },
-  { workyardId: '165157', name: 'Lui Maldonado' },
-  { workyardId: '160547', name: 'Luis Perez' },
-  { workyardId: '127359', name: 'Rene Arevalo' },
-  { workyardId: '127507', name: 'Rolando Vasquez' },
-  { workyardId: '205770', name: 'Stan Baldyga' },
-  { workyardId: '165161', name: 'William Thomas' },
-  { workyardId: '83306', name: 'Carlos Nieves' },
-  { workyardId: '143157', name: 'Christian Arevalo' },
+/**
+ * Workyard team members that match seeded payroll_employees.workyard_id.
+ * `hourlyRate` mocks the pay rate Workyard returns on the employee record, so the
+ * "Sync Workyard IDs" flow can pull rates with no live creds (WORKYARD_MOCK=1).
+ */
+const MOCK_WORKERS: { workyardId: string; name: string; hourlyRate: number }[] = [
+  { workyardId: '122736', name: 'Angel Salazar', hourlyRate: 28 },
+  { workyardId: '127502', name: 'Darwin Montesdeoca', hourlyRate: 26 },
+  { workyardId: '205764', name: 'Javier Rivera', hourlyRate: 30 },
+  { workyardId: '165157', name: 'Lui Maldonado', hourlyRate: 24 },
+  { workyardId: '160547', name: 'Luis Perez', hourlyRate: 25 },
+  { workyardId: '127359', name: 'Rene Arevalo', hourlyRate: 32 },
+  { workyardId: '127507', name: 'Rolando Vasquez', hourlyRate: 27 },
+  { workyardId: '205770', name: 'Stan Baldyga', hourlyRate: 35 },
+  { workyardId: '165161', name: 'William Thomas', hourlyRate: 23 },
+  { workyardId: '83306', name: 'Carlos Nieves', hourlyRate: 29 },
+  { workyardId: '143157', name: 'Christian Arevalo', hourlyRate: 22 },
 ]
 
 /** Property S-codes that exist in the seeded `properties` table. */
@@ -35,6 +39,34 @@ const MOCK_PROPERTY_CODES = [
 export function isWorkyardMockEnabled(): boolean {
   const v = process.env.WORKYARD_MOCK?.toLowerCase()
   return v === '1' || v === 'true' || v === 'yes'
+}
+
+export interface MockWorkyardEmployee {
+  employee_id: number
+  display_name: string
+  first_name: string
+  last_name: string
+  email: string | null
+  status: string
+  title: string | null
+  hourly_rate: number | null
+}
+
+/** Mock of Workyard's employee roster (with pay rate) for the rate-sync flow. */
+export function generateMockEmployees(): MockWorkyardEmployee[] {
+  return MOCK_WORKERS.map((w) => {
+    const [first, ...rest] = w.name.split(' ')
+    return {
+      employee_id: Number(w.workyardId),
+      display_name: w.name,
+      first_name: first,
+      last_name: rest.join(' '),
+      email: null,
+      status: 'active',
+      title: 'Maintenance Technician',
+      hourly_rate: w.hourlyRate,
+    }
+  })
 }
 
 /** Add `days` to a YYYY-MM-DD string (UTC-safe), returning YYYY-MM-DD. */

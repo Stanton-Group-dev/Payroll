@@ -21,6 +21,7 @@ interface WYEmployeeBasic {
   email: string | null
   status: string
   title: string | null
+  hourly_rate: number | null
 }
 
 interface SyncRow {
@@ -29,6 +30,7 @@ interface SyncRow {
   wyFirstName: string
   matchedEmployeeId: string
   autoMatched: boolean
+  wyRate: number | null
 }
 
 const DEPARTMENTS = ['Acquisitions', 'Asset Management', 'Collections', 'Maintenance', 'Leasing', 'Administration']
@@ -86,6 +88,7 @@ export default function EmployeesPage() {
   const [syncError, setSyncError] = useState<string | null>(null)
   const [syncRows, setSyncRows] = useState<SyncRow[]>([])
   const [syncDone, setSyncDone] = useState(false)
+  const [syncSummary, setSyncSummary] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [newRate, setNewRate] = useState('')
@@ -125,6 +128,7 @@ export default function EmployeesPage() {
           wyFirstName: wy.first_name,
           matchedEmployeeId: matched?.id ?? '',
           autoMatched: !!matched,
+          wyRate: wy.hourly_rate ?? null,
         }
       })
       setSyncRows(rows)
@@ -138,18 +142,42 @@ export default function EmployeesPage() {
   const handleSyncSave = async () => {
     setSyncSaving(true)
     setSyncError(null)
+    setSyncSummary(null)
     try {
       const supabase = createClient()
+      const today = new Date().toISOString().split('T')[0]
       const toUpdate = syncRows.filter(r => r.matchedEmployeeId)
+      let ratesApplied = 0
       for (const row of toUpdate) {
+        const current = employees.find(e => e.id === row.matchedEmployeeId)
+        const rateChanged =
+          row.wyRate != null && Number(current?.hourly_rate ?? NaN) !== row.wyRate
+        const update: { workyard_id: string; hourly_rate?: number } = { workyard_id: row.wyId }
+        if (rateChanged) update.hourly_rate = row.wyRate as number
+
         const { error } = await supabase
           .from('payroll_employees')
-          .update({ workyard_id: row.wyId })
+          .update(update)
           .eq('id', row.matchedEmployeeId)
         if (error) throw new Error(error.message)
+
+        // Record the rate in the effective-dated history so the change is auditable.
+        if (rateChanged) {
+          const { error: rateErr } = await supabase.from('payroll_employee_rates').insert({
+            employee_id: row.matchedEmployeeId,
+            rate: row.wyRate as number,
+            effective_date: today,
+          })
+          if (rateErr) throw new Error(rateErr.message)
+          ratesApplied++
+        }
       }
       await refetch()
       setSyncDone(true)
+      setSyncSummary(
+        `Linked ${toUpdate.length} employee${toUpdate.length === 1 ? '' : 's'}` +
+          (ratesApplied > 0 ? ` · pulled ${ratesApplied} pay rate${ratesApplied === 1 ? '' : 's'} from Workyard` : '')
+      )
     } catch (err) {
       setSyncError(err instanceof Error ? err.message : 'Save failed')
     } finally {
@@ -255,8 +283,8 @@ export default function EmployeesPage() {
       {syncOpen && (
         <div className="border-b border-[var(--border)] bg-[var(--bg-section)] px-6 py-4">
           <div className="flex items-center justify-between mb-3">
-            <h3 className="font-serif text-base text-[var(--primary)]">Sync Workyard IDs</h3>
-            <p className="text-xs text-[var(--muted)]">Match payroll employees to their Workyard accounts to enable automatic time card import</p>
+            <h3 className="font-serif text-base text-[var(--primary)]">Sync Workyard IDs &amp; Rates</h3>
+            <p className="text-xs text-[var(--muted)]">Match payroll employees to their Workyard accounts and pull their pay rates</p>
           </div>
 
           {syncError && (
@@ -265,7 +293,7 @@ export default function EmployeesPage() {
 
           {syncDone && (
             <div className="mb-3 p-2 bg-[var(--success)]/10 border border-[var(--success)]/30 text-xs text-[var(--success)] flex items-center gap-2">
-              <Check size={12} /> Workyard IDs saved successfully.
+              <Check size={12} /> {syncSummary ?? 'Workyard IDs saved successfully.'}
             </div>
           )}
 
@@ -282,6 +310,7 @@ export default function EmployeesPage() {
                     <tr className="bg-[var(--primary)] text-white sticky top-0">
                       <th className="px-3 py-2 text-left font-medium">Workyard Employee</th>
                       <th className="px-3 py-2 text-left font-medium">Workyard ID</th>
+                      <th className="px-3 py-2 text-right font-medium">Rate</th>
                       <th className="px-3 py-2 text-left font-medium">Match to Payroll Employee</th>
                     </tr>
                   </thead>
@@ -295,6 +324,9 @@ export default function EmployeesPage() {
                           {row.wyName}
                         </td>
                         <td className="px-3 py-1.5 font-mono">{row.wyId}</td>
+                        <td className="px-3 py-1.5 text-right font-medium">
+                          {row.wyRate != null ? `$${row.wyRate.toFixed(2)}/hr` : <span className="text-[var(--muted)]">—</span>}
+                        </td>
                         <td className="px-3 py-1.5">
                           <select
                             value={row.matchedEmployeeId}
