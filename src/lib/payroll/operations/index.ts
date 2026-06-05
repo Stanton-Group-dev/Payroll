@@ -3,7 +3,7 @@
  * exist. Both the agent tool surface and the execute endpoint look operations
  * up here by name, so a new audited capability is added in exactly one place.
  */
-import type { Operation } from './core'
+import type { Operation, ConsoleRole } from './core'
 import { addTime, adjustTime, removeTime } from './timeEntries'
 import {
   addEmployee,
@@ -25,22 +25,30 @@ import {
  */
 export type RegisteredOperation = Operation<unknown, unknown>
 
-function register(op: Operation<never, never>): RegisteredOperation {
-  return op as unknown as RegisteredOperation
+/**
+ * Register an operation with the minimum console role required to run it. The
+ * role assigned here is the authoritative authorization matrix for the whole
+ * payroll console; previewOperation/executeOperation enforce it centrally.
+ */
+function register(op: Operation<never, never>, minRole: ConsoleRole): RegisteredOperation {
+  return { ...(op as unknown as RegisteredOperation), minRole }
 }
 
 const REGISTRY: Record<string, RegisteredOperation> = {
-  [addTime.name]: register(addTime as unknown as Operation<never, never>),
-  [adjustTime.name]: register(adjustTime as unknown as Operation<never, never>),
-  [removeTime.name]: register(removeTime as unknown as Operation<never, never>),
-  [addEmployee.name]: register(addEmployee as unknown as Operation<never, never>),
-  [updateEmployee.name]: register(updateEmployee as unknown as Operation<never, never>),
-  [deactivateEmployee.name]: register(deactivateEmployee as unknown as Operation<never, never>),
-  [reactivateEmployee.name]: register(reactivateEmployee as unknown as Operation<never, never>),
-  [addExternalProject.name]: register(addExternalProject as unknown as Operation<never, never>),
-  [updateExternalProject.name]: register(updateExternalProject as unknown as Operation<never, never>),
-  [deactivateExternalProject.name]: register(deactivateExternalProject as unknown as Operation<never, never>),
-  [reactivateExternalProject.name]: register(reactivateExternalProject as unknown as Operation<never, never>),
+  // Time entries are routine manager work.
+  [addTime.name]: register(addTime as unknown as Operation<never, never>, 'manager'),
+  [adjustTime.name]: register(adjustTime as unknown as Operation<never, never>, 'manager'),
+  [removeTime.name]: register(removeTime as unknown as Operation<never, never>, 'manager'),
+  // Employee master-record changes are admin-only.
+  [addEmployee.name]: register(addEmployee as unknown as Operation<never, never>, 'admin'),
+  [updateEmployee.name]: register(updateEmployee as unknown as Operation<never, never>, 'admin'),
+  [deactivateEmployee.name]: register(deactivateEmployee as unknown as Operation<never, never>, 'admin'),
+  [reactivateEmployee.name]: register(reactivateEmployee as unknown as Operation<never, never>, 'admin'),
+  // External projects / clients are admin-only structural changes.
+  [addExternalProject.name]: register(addExternalProject as unknown as Operation<never, never>, 'admin'),
+  [updateExternalProject.name]: register(updateExternalProject as unknown as Operation<never, never>, 'admin'),
+  [deactivateExternalProject.name]: register(deactivateExternalProject as unknown as Operation<never, never>, 'admin'),
+  [reactivateExternalProject.name]: register(reactivateExternalProject as unknown as Operation<never, never>, 'admin'),
 }
 
 export function getOperation(name: string): RegisteredOperation | null {

@@ -12,6 +12,11 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ZodType } from 'zod'
+import { roleAtLeast, UnauthorizedError, type ConsoleRole } from './roles'
+
+// Re-export so callers can get the authz types/errors from the operation core.
+export { UnauthorizedError }
+export type { ConsoleRole }
 
 export type OperationSource = 'ui' | 'agent' | 'system'
 
@@ -65,6 +70,13 @@ export interface Operation<TInput, TResult> {
   name: string
   /** Short description used in the agent tool surface. */
   description: string
+  /**
+   * Minimum console role required to preview or execute this operation.
+   * Enforced centrally in previewOperation/executeOperation, so every caller
+   * (the agent and the UI operation routes) is gated identically. Defaults to
+   * 'manager' when omitted.
+   */
+  minRole?: ConsoleRole
   schema: ZodType<TInput>
   plan: (ctx: OperationContext, input: TInput) => Promise<Plan<TResult>>
 }
@@ -111,6 +123,18 @@ export class OperationValidationError extends OperationError {
   }
 }
 
+/**
+ * Central authorization gate. Throws UnauthorizedError unless the actor meets the
+ * operation's minimum role. Every operation goes through here for both preview and
+ * execute, so authorization can never be forgotten by an individual route.
+ */
+function assertOperationRole(ctx: OperationContext, op: Operation<unknown, unknown>): void {
+  const min = op.minRole ?? 'manager'
+  if (!roleAtLeast(ctx.actor.role, min)) {
+    throw new UnauthorizedError(`This action requires ${min} access.`)
+  }
+}
+
 function validate<TInput, TResult>(op: Operation<TInput, TResult>, raw: unknown): TInput {
   const parsed = op.schema.safeParse(raw)
   if (!parsed.success) {
@@ -129,6 +153,7 @@ export async function previewOperation<TInput, TResult>(
   op: Operation<TInput, TResult>,
   raw: unknown
 ): Promise<PlanPreview> {
+  assertOperationRole(ctx, op as Operation<unknown, unknown>)
   const input = validate(op, raw)
   const plan = await op.plan(ctx, input)
   return toPreview(plan)
@@ -143,6 +168,7 @@ export async function executeOperation<TInput, TResult>(
   op: Operation<TInput, TResult>,
   raw: unknown
 ): Promise<{ preview: PlanPreview; result: TResult }> {
+  assertOperationRole(ctx, op as Operation<unknown, unknown>)
   const input = validate(op, raw)
   const plan = await op.plan(ctx, input)
   if (plan.blockers.length > 0) {

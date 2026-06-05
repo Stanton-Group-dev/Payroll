@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server'
-import { buildOperationContext, UnauthenticatedError } from '@/lib/payroll/agent/context'
+import { buildOperationContext, UnauthenticatedError, UnauthorizedError } from '@/lib/payroll/agent/context'
 import { getOperation } from '@/lib/payroll/operations'
 import {
   executeOperation,
@@ -36,6 +36,9 @@ export async function POST(request: Request) {
   } catch (err) {
     if (err instanceof UnauthenticatedError) {
       return NextResponse.json({ error: 'Not authenticated' }, { status: 401 })
+    }
+    if (err instanceof UnauthorizedError) {
+      return NextResponse.json({ error: err.message }, { status: 403 })
     }
     if (err instanceof OperationValidationError) {
       return NextResponse.json({ error: err.message, issues: err.issues }, { status: 400 })
