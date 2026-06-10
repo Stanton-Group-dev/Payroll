@@ -84,6 +84,18 @@ export function getMgmtFeeRate(
   return global?.rate_pct ?? 0.10
 }
 
+/**
+ * Overtime pay multiplier by worker classification.
+ *  - hourly (W2): time-and-a-half (1.5×) per FLSA.
+ *  - contractor (1099): no OT premium — OT hours paid at straight rate.
+ *  - salaried: exempt — no hourly OT (their pay comes from weekly_rate).
+ */
+export function otMultiplier(type: string): number {
+  if (type === 'hourly') return 1.5
+  if (type === 'contractor') return 1.0
+  return 0 // salaried: exempt
+}
+
 export function calculatePayroll(
   employees: PayrollEmployee[],
   entries: PayrollTimeEntry[],
@@ -126,7 +138,7 @@ export function calculatePayroll(
     empData[entry.employee_id].ot_hours += entry.ot_hours ?? 0
     empData[entry.employee_id].pto_hours += entry.pto_hours ?? 0
     empData[entry.employee_id].regular_wages += (entry.regular_hours ?? 0) * rate
-    empData[entry.employee_id].ot_wages += (entry.ot_hours ?? 0) * rate
+    empData[entry.employee_id].ot_wages += (entry.ot_hours ?? 0) * rate * otMultiplier(emp.type)
   }
 
   // Salaried employees: use weekly_rate directly
@@ -189,7 +201,8 @@ export function calculatePayroll(
     const emp = employeeMap[entry.employee_id]
     if (!emp) continue
     const rate = emp.hourly_rate ?? 0
-    const cost = ((entry.regular_hours ?? 0) + (entry.ot_hours ?? 0)) * rate
+    // OT premium flows into the property's labor cost too (it bears the actual wage).
+    const cost = (entry.regular_hours ?? 0) * rate + (entry.ot_hours ?? 0) * rate * otMultiplier(emp.type)
     propLaborCost[entry.property_id] = (propLaborCost[entry.property_id] ?? 0) + cost
   }
 

@@ -1,0 +1,266 @@
+// Verifies the core payroll engine (calculatePayroll + getMgmtFeeRate).
+// Every expected number below is computed BY HAND in the comment above the
+// assertion, so a failure means the engine drifted from the documented intent.
+// Run: npx tsx scripts/verify-calculations.mts
+import { calculatePayroll, getMgmtFeeRate } from '../src/lib/payroll/calculations.ts'
+import { PAYROLL_TAX_RATE, WORKERS_COMP_RATE } from '../src/lib/payroll/config.ts'
+import type {
+  PayrollEmployee,
+  PayrollTimeEntry,
+  PayrollAdjustment,
+  PayrollManagementFeeConfig,
+  Property,
+} from '../src/lib/supabase/types.ts'
+
+let failures = 0
+function check(name: string, cond: boolean, extra = '') {
+  if (!cond) failures++
+  console.log(`${cond ? '✓' : '✗'} ${name}${cond ? '' : `  →  ${extra}`}`)
+}
+function near(a: number, b: number) {
+  return Math.abs(a - b) < 0.005
+}
+
+// --- factories: fill only the fields the engine reads, default the rest ---
+function emp(p: Partial<PayrollEmployee> & { id: string; name: string }): PayrollEmployee {
+  return {
+    workyard_id: null, type: 'hourly', hourly_rate: null, weekly_rate: null,
+    trade: null, is_active: true, ot_allowed: true, pay_tax: false, wc: false,
+    created_at: '', updated_at: '', created_by: null, ...p,
+  } as PayrollEmployee
+}
+function entry(p: Partial<PayrollTimeEntry> & { employee_id: string }): PayrollTimeEntry {
+  return {
+    id: 'te', payroll_week_id: 'w', property_id: null, entry_date: '2026-05-17',
+    regular_hours: 0, ot_hours: 0, pto_hours: 0, source: 'workyard',
+    workyard_timecardid: null, is_flagged: false, flag_reason: null, is_active: true,
+    pending_resolution: false, pending_note: null, pending_since: null,
+    spread_event_id: null, created_at: '', updated_at: '', created_by: null, ...p,
+  } as PayrollTimeEntry
+}
+function adj(p: Partial<PayrollAdjustment> & { employee_id: string; type: PayrollAdjustment['type']; amount: number }): PayrollAdjustment {
+  return {
+    id: 'a', payroll_week_id: 'w', description: '', allocation_method: 'employee_pay',
+    prior_week_id: null, created_at: '', updated_at: '', created_by: null, ...p,
+  } as PayrollAdjustment
+}
+function prop(p: Partial<Property> & { id: string; code: string }): Property {
+  return {
+    appfolio_property_id: '', name: p.code, address: null, total_units: 0,
+    portfolio_id: null, billing_llc: null, is_active: true, ...p,
+  } as Property
+}
+const NO_FEES: PayrollManagementFeeConfig[] = []   // → default rate 0.10
+function feeCfg(p: Partial<PayrollManagementFeeConfig> & { rate_pct: number; effective_date: string }): PayrollManagementFeeConfig {
+  return { id: 'f', portfolio_id: null, created_at: '', created_by: null, ...p } as PayrollManagementFeeConfig
+}
+
+const get = (r: ReturnType<typeof calculatePayroll>, id: string) =>
+  r.employee_summaries.find((e) => e.employee_id === id)!
+
+console.log('\n== 1. Basic hourly: 40h @ $25 ==')
+{
+  // regular_wages = 40*25 = 1000; gross = 1000
+  // tax = 1000*0.08 = 80; wc = 1000*0.03 = 30; mgmt = 1000*0.10 = 100
+  // total_billable = 1000+80+30+100 = 1210
+  const r = calculatePayroll(
+    [emp({ id: 'A', name: 'Al', hourly_rate: 25, pay_tax: true, wc: true })],
+    [entry({ employee_id: 'A', regular_hours: 40 })],
+    [], NO_FEES, []
+  )
+  const a = get(r, 'A')
+  check('regular_wages 1000', a.regular_wages === 1000, `${a.regular_wages}`)
+  check('gross_pay 1000', a.gross_pay === 1000, `${a.gross_pay}`)
+  check('payroll_tax 80', a.payroll_tax === 80, `${a.payroll_tax}`)
+  check('workers_comp 30', a.workers_comp === 30, `${a.workers_comp}`)
+  check('management_fee 100', a.management_fee === 100, `${a.management_fee}`)
+  check('total_billable 1210', a.total_billable === 1210, `${a.total_billable}`)
+  check('required_prefund 1110 (gross+tax+wc, NO mgmt fee)', r.required_prefund === 1110, `${r.required_prefund}`)
+}
+
+console.log('\n== 2. OVERTIME by worker class: W2 hourly 1.5x, contractor 1.0x ==')
+{
+  // HOURLY W2: 40 reg + 10 OT @ $20
+  //   regular = 800; ot = 10 * 20 * 1.5 = 300; gross = 1100
+  const w2 = calculatePayroll(
+    [emp({ id: 'B', name: 'Bo', type: 'hourly', hourly_rate: 20 })],
+    [entry({ employee_id: 'B', regular_hours: 40, ot_hours: 10 })],
+    [], NO_FEES, []
+  )
+  const b = get(w2, 'B')
+  check('W2 regular_wages 800', b.regular_wages === 800, `${b.regular_wages}`)
+  check('W2 ot_wages 300 = time-and-a-half (10*20*1.5)', b.ot_wages === 300, `${b.ot_wages}`)
+  check('W2 gross 1100 (800+300)', b.gross_pay === 1100, `${b.gross_pay}`)
+
+  // CONTRACTOR (1099): same hours, NO OT premium
+  //   ot = 10 * 20 * 1.0 = 200; gross = 1000
+  const c99 = calculatePayroll(
+    [emp({ id: 'B', name: 'Bo', type: 'contractor', hourly_rate: 20 })],
+    [entry({ employee_id: 'B', regular_hours: 40, ot_hours: 10 })],
+    [], NO_FEES, []
+  )
+  const bc = get(c99, 'B')
+  check('contractor ot_wages 200 = straight rate (no premium)', bc.ot_wages === 200, `${bc.ot_wages}`)
+  check('contractor gross 1000', bc.gross_pay === 1000, `${bc.gross_pay}`)
+}
+
+console.log('\n== 3. Adjustments: phone adds, advance/deduction SUBTRACT ==')
+{
+  // hourly_rate 0, no hours. Adjustments only.
+  //  phone   +8  → phone_reimbursement = 8
+  //  tool    +50 → other_adjustments  (adds)
+  //  expense +30 → other_adjustments  (adds)  => other = 80
+  //  advance  100 → advances += |100| = 100  (subtracts)
+  //  deduction_other -25 → advances += |−25| = 25  => advances = 125
+  // gross = 0 + 0 + 8 + 80 − 125 = −37  (gross CAN go negative)
+  const r = calculatePayroll(
+    [emp({ id: 'C', name: 'Cy', hourly_rate: 0 })],
+    [],
+    [
+      adj({ employee_id: 'C', type: 'phone', amount: 8 }),
+      adj({ employee_id: 'C', type: 'tool', amount: 50 }),
+      adj({ employee_id: 'C', type: 'expense_reimbursement', amount: 30 }),
+      adj({ employee_id: 'C', type: 'advance', amount: 100 }),
+      adj({ employee_id: 'C', type: 'deduction_other', amount: -25 }),
+    ],
+    NO_FEES, []
+  )
+  const c = get(r, 'C')
+  check('phone_reimbursement 8', c.phone_reimbursement === 8, `${c.phone_reimbursement}`)
+  check('other_adjustments 80 (tool+expense)', c.other_adjustments === 80, `${c.other_adjustments}`)
+  check('advances 125 (advance + |deduction|)', c.advances === 125, `${c.advances}`)
+  check('gross −37 (advances subtract; gross can be negative)', c.gross_pay === -37, `${c.gross_pay}`)
+}
+
+console.log('\n== 4. Salaried: weekly_rate, ignores hours ==')
+{
+  // type salaried, weekly_rate 1500, has a 40h entry — entry hours ignored for wages
+  const r = calculatePayroll(
+    [emp({ id: 'D', name: 'Di', type: 'salaried', weekly_rate: 1500, hourly_rate: 99 })],
+    [entry({ employee_id: 'D', regular_hours: 40 })],
+    [], NO_FEES, []
+  )
+  const d = get(r, 'D')
+  check('regular_wages 1500 (weekly_rate, NOT 40*99)', d.regular_wages === 1500, `${d.regular_wages}`)
+  check('gross 1500', d.gross_pay === 1500, `${d.gross_pay}`)
+}
+
+console.log('\n== 4b. Salaried is exempt: OT hours pay nothing ==')
+{
+  // salaried weekly_rate 1500, entry with 5 OT hrs.
+  // otMultiplier(salaried)=0 → ot_wages = 5*20*0 = 0; regular overwritten to 1500.
+  // gross = 1500 (no OT leak — the prior straight-rate leak is fixed).
+  const r = calculatePayroll(
+    [emp({ id: 'E', name: 'Ed', type: 'salaried', weekly_rate: 1500, hourly_rate: 20 })],
+    [entry({ employee_id: 'E', regular_hours: 40, ot_hours: 5 })],
+    [], NO_FEES, []
+  )
+  const e = get(r, 'E')
+  check('salaried regular_wages 1500', e.regular_wages === 1500, `${e.regular_wages}`)
+  check('salaried ot_wages 0 (exempt — no OT leak)', e.ot_wages === 0, `${e.ot_wages}`)
+  check('salaried gross 1500', e.gross_pay === 1500, `${e.gross_pay}`)
+}
+
+console.log('\n== 5. pay_tax / wc flags off → no burden ==')
+{
+  // 10h @ $30 = 300 gross; flags false → tax 0, wc 0
+  const r = calculatePayroll(
+    [emp({ id: 'F', name: 'Fi', hourly_rate: 30, pay_tax: false, wc: false })],
+    [entry({ employee_id: 'F', regular_hours: 10 })],
+    [], NO_FEES, []
+  )
+  const f = get(r, 'F')
+  check('gross 300', f.gross_pay === 300, `${f.gross_pay}`)
+  check('payroll_tax 0 (pay_tax=false)', f.payroll_tax === 0, `${f.payroll_tax}`)
+  check('workers_comp 0 (wc=false)', f.workers_comp === 0, `${f.workers_comp}`)
+}
+
+console.log('\n== 6. Multi-entry aggregation + run totals ==')
+{
+  // A: two entries 16h + 24h @ $25 → 40h → 1000 gross; pay_tax+wc on
+  // F: 10h @ $30 → 300 gross; no tax/wc
+  // totals: gross 1300; tax = 1000*0.08 = 80; wc = 1000*0.03 = 30
+  // required_prefund = 1300+80+30 = 1410
+  const r = calculatePayroll(
+    [
+      emp({ id: 'A', name: 'Al', hourly_rate: 25, pay_tax: true, wc: true }),
+      emp({ id: 'F', name: 'Fi', hourly_rate: 30 }),
+    ],
+    [
+      entry({ employee_id: 'A', regular_hours: 16 }),
+      entry({ employee_id: 'A', regular_hours: 24 }),
+      entry({ employee_id: 'F', regular_hours: 10 }),
+    ],
+    [], NO_FEES, []
+  )
+  check('A aggregated to 40h', get(r, 'A').regular_hours === 40)
+  check('total_gross_pay 1300', r.total_gross_pay === 1300, `${r.total_gross_pay}`)
+  check('total_payroll_tax 80', r.total_payroll_tax === 80, `${r.total_payroll_tax}`)
+  check('total_workers_comp 30', r.total_workers_comp === 30, `${r.total_workers_comp}`)
+  check('required_prefund 1410', r.required_prefund === 1410, `${r.required_prefund}`)
+}
+
+console.log('\n== 7. Property labor, unit-weighted spread, property mgmt fee ==')
+{
+  // P1 10 units, P2 30 units → 40 total
+  // A is W2 hourly @ $25, entry 40 reg + 4 OT on P1
+  //   labor P1 = 40*25 + 4*25*1.5 = 1000 + 150 = 1150  (OT premium in labor)
+  // spread = phone(8) + tool(32) = 40
+  //   spread P1 = 10/40*40 = 10 ; spread P2 = 30/40*40 = 30
+  // mgmt 0.10: P1 = (1150+10)*.1 = 116 ; P2 = (0+30)*.1 = 3
+  // P1 total = 1276, cost/unit 127.6 ; P2 total = 33, cost/unit 1.1
+  const P1 = prop({ id: 'P1', code: 'P1', total_units: 10 })
+  const P2 = prop({ id: 'P2', code: 'P2', total_units: 30 })
+  const r = calculatePayroll(
+    [emp({ id: 'A', name: 'Al', type: 'hourly', hourly_rate: 25 }), emp({ id: 'X', name: 'Xi', hourly_rate: 0 })],
+    [entry({ employee_id: 'A', regular_hours: 40, ot_hours: 4, property_id: 'P1' })],
+    [
+      adj({ employee_id: 'X', type: 'phone', amount: 8 }),
+      adj({ employee_id: 'X', type: 'tool', amount: 32 }),
+    ],
+    NO_FEES, [P1, P2]
+  )
+  const p1 = r.property_costs.find((p) => p.property_id === 'P1')!
+  const p2 = r.property_costs.find((p) => p.property_id === 'P2')!
+  check('P1 labor 1150 (OT premium in labor: 1000 + 4*25*1.5)', p1.labor_cost === 1150, `${p1.labor_cost}`)
+  check('P1 spread 10', near(p1.spread_cost, 10), `${p1.spread_cost}`)
+  check('P2 spread 30', near(p2.spread_cost, 30), `${p2.spread_cost}`)
+  check('P1 mgmt_fee 116', near(p1.mgmt_fee, 116), `${p1.mgmt_fee}`)
+  check('P1 total_cost 1276', near(p1.total_cost, 1276), `${p1.total_cost}`)
+  check('P1 cost_per_unit 127.6', near(p1.cost_per_unit, 127.6), `${p1.cost_per_unit}`)
+  check('P2 total_cost 33', near(p2.total_cost, 33), `${p2.total_cost}`)
+}
+
+console.log('\n== 8. getMgmtFeeRate: override / global / default ==')
+{
+  const cfgs = [
+    feeCfg({ rate_pct: 0.12, effective_date: '2025-01-01', portfolio_id: null }),
+    feeCfg({ rate_pct: 0.15, effective_date: '2025-01-01', portfolio_id: 'PF-X' }),
+    feeCfg({ rate_pct: 0.99, effective_date: '2999-01-01', portfolio_id: null }), // future → ignored
+  ]
+  check('portfolio override 0.15', getMgmtFeeRate('PF-X', cfgs) === 0.15, `${getMgmtFeeRate('PF-X', cfgs)}`)
+  check('unknown portfolio → global 0.12', getMgmtFeeRate('PF-Y', cfgs) === 0.12, `${getMgmtFeeRate('PF-Y', cfgs)}`)
+  check('null portfolio → global 0.12', getMgmtFeeRate(null, cfgs) === 0.12, `${getMgmtFeeRate(null, cfgs)}`)
+  check('future effective_date ignored (not 0.99)', getMgmtFeeRate(null, cfgs) !== 0.99)
+  check('no config → default 0.10', getMgmtFeeRate(null, NO_FEES) === 0.10, `${getMgmtFeeRate(null, NO_FEES)}`)
+}
+
+console.log('\n== 9. Rounding to the cent ==')
+{
+  // 7h @ $14.285 = 99.995 → round half-up → 100.00
+  const r = calculatePayroll(
+    [emp({ id: 'G', name: 'Gi', hourly_rate: 14.285 })],
+    [entry({ employee_id: 'G', regular_hours: 7 })],
+    [], NO_FEES, []
+  )
+  check('99.995 → 100.00 (round half up)', get(r, 'G').gross_pay === 100, `${get(r, 'G').gross_pay}`)
+}
+
+console.log('\n== 10. config constants are what the math assumes ==')
+{
+  check('PAYROLL_TAX_RATE = 0.08', PAYROLL_TAX_RATE === 0.08, `${PAYROLL_TAX_RATE}`)
+  check('WORKERS_COMP_RATE = 0.03', WORKERS_COMP_RATE === 0.03, `${WORKERS_COMP_RATE}`)
+}
+
+console.log(failures === 0 ? '\nALL PASSED' : `\n${failures} FAILED`)
+process.exit(failures === 0 ? 0 : 1)

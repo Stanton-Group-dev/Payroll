@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { otMultiplier } from '@/lib/payroll/calculations'
 
 export interface WeekHistoryData {
   invoices: Array<{ id: string; owner_llc: string; total_amount: number; status: string }>
@@ -108,7 +109,7 @@ export function useEmployeePayHistory() {
       row.ot_hours += entry.ot_hours ?? 0
       row.pto_hours += entry.pto_hours ?? 0
       const rate = emp?.hourly_rate ?? 0
-      row.gross_pay += ((entry.regular_hours ?? 0) + (entry.ot_hours ?? 0)) * rate
+      row.gross_pay += (entry.regular_hours ?? 0) * rate + (entry.ot_hours ?? 0) * rate * otMultiplier(emp?.type ?? 'hourly')
     }
 
     if (emp?.type === 'salaried' && emp.weekly_rate) {

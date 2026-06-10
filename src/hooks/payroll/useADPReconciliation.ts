@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { otMultiplier } from '@/lib/payroll/calculations'
 import type { PayrollWeek, PayrollADPReconciliation } from '@/lib/supabase/types'
 
 export interface SystemEmployeeRow {
@@ -71,7 +72,7 @@ export function useADPReconciliation(weekId: string) {
       if (emp.type === 'salaried' && emp.weekly_rate) {
         empGross[entry.employee_id] = emp.weekly_rate
       } else {
-        empGross[entry.employee_id] += ((entry.regular_hours ?? 0) + (entry.ot_hours ?? 0)) * emp.hourly_rate
+        empGross[entry.employee_id] += (entry.regular_hours ?? 0) * emp.hourly_rate + (entry.ot_hours ?? 0) * emp.hourly_rate * otMultiplier(emp.type)
       }
     }
     for (const adj of (adjRes.data ?? [])) {
