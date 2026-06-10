@@ -5,7 +5,7 @@ import {
   UnauthenticatedError,
   UnauthorizedError,
 } from '@/lib/payroll/agent/context'
-import { runAgent, AgentUnavailableError, type ChatTurn } from '@/lib/payroll/agent/run'
+import { runAgent, AgentUnavailableError, type ChatTurn, type WeekContext } from '@/lib/payroll/agent/run'
 import type { AgentMode } from '@/lib/payroll/agent/tools'
 
 export const runtime = 'nodejs'
@@ -19,7 +19,7 @@ export const runtime = 'nodejs'
  * proposals) requires super-admin.
  */
 export async function POST(request: Request) {
-  let body: { messages?: ChatTurn[]; message?: string; mode?: AgentMode }
+  let body: { messages?: ChatTurn[]; message?: string; mode?: AgentMode; weekContext?: WeekContext | null }
   try {
     body = await request.json()
   } catch {
@@ -37,12 +37,16 @@ export async function POST(request: Request) {
   }
 
   const mode: AgentMode = body.mode === 'full' ? 'full' : 'report'
+  const weekContext: WeekContext | null =
+    body.weekContext && body.weekContext.weekStart && body.weekContext.weekEnd
+      ? { weekStart: body.weekContext.weekStart, weekEnd: body.weekContext.weekEnd }
+      : null
 
   try {
     const prompt = [...history].reverse().find((m) => m.role === 'user')?.content
     const ctx = await buildOperationContext('agent', prompt)
     assertRole(ctx, mode === 'full' ? 'superadmin' : 'manager')
-    const result = await runAgent(ctx, history, mode)
+    const result = await runAgent(ctx, history, mode, weekContext)
     return NextResponse.json(result)
   } catch (err) {
     if (err instanceof UnauthenticatedError) {

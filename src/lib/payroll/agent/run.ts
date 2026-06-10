@@ -38,10 +38,16 @@ export class AgentUnavailableError extends Error {
   }
 }
 
+export interface WeekContext {
+  weekStart: string
+  weekEnd: string
+}
+
 export async function runAgent(
   ctx: OperationContext,
   history: ChatTurn[],
-  mode: AgentMode = 'full'
+  mode: AgentMode = 'full',
+  weekContext?: WeekContext | null
 ): Promise<AgentResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) throw new AgentUnavailableError()
@@ -50,6 +56,7 @@ export async function runAgent(
   const model = process.env.PAYROLL_AGENT_MODEL || DEFAULT_MODEL
   const tools = buildTools(mode) as Anthropic.Tool[]
   const today = new Date()
+  const weekAnchorIso = weekContext?.weekStart ?? null
 
   const messages: Anthropic.MessageParam[] = history.map((t) => ({
     role: t.role,
@@ -62,7 +69,7 @@ export async function runAgent(
     const resp = await client.messages.create({
       model,
       max_tokens: 1024,
-      system: systemPrompt(today, mode),
+      system: systemPrompt(today, mode, weekContext),
       tools,
       messages,
     })
@@ -86,7 +93,7 @@ export async function runAgent(
     const toolResults: Anthropic.ToolResultBlockParam[] = []
 
     for (const tu of toolUses) {
-      const outcome = await dispatchTool(ctx, tu.name, (tu.input ?? {}) as Record<string, unknown>)
+      const outcome = await dispatchTool(ctx, tu.name, (tu.input ?? {}) as Record<string, unknown>, weekAnchorIso)
 
       if (outcome.kind === 'proposal') {
         const op = getOperation(outcome.operation)

@@ -69,10 +69,35 @@ function nextWeekday(today: Date, weekdayIndex: number): Date {
 }
 
 /**
+ * The date landing on `weekdayIndex` within the 7-day window starting at
+ * `weekStart` (inclusive). Robust to the week's alignment — payroll weeks may
+ * start on a Sunday or a Monday depending on pay_group — because it scans the
+ * actual span rather than assuming a fixed first day.
+ */
+function weekdayWithinWeek(weekStart: Date, weekdayIndex: number): Date {
+  let d = weekStart
+  for (let i = 0; i < 7; i++) {
+    if (d.getDay() === weekdayIndex) return d
+    d = addDays(d, 1)
+  }
+  return weekStart
+}
+
+/**
  * Parse a natural-language or explicit date phrase relative to `today`.
  * Returns null when nothing recognizable is found (caller should disambiguate).
+ *
+ * When `weekAnchor` is supplied (the Sunday week_start of the week the user is
+ * viewing), week-relative phrases anchor to that week instead of today's week:
+ * a bare "monday" means the Monday of the viewed week, "this week" is the viewed
+ * week, and "last/next week" step off it. Phrases that are inherently relative to
+ * now ("today", "yesterday", "last friday", "next tuesday") always use `today`.
  */
-export function parseRelativeDate(phrase: string, today: Date = new Date()): ParsedDate | null {
+export function parseRelativeDate(
+  phrase: string,
+  today: Date = new Date(),
+  weekAnchor?: Date | null
+): ParsedDate | null {
   const text = phrase.toLowerCase().trim()
   if (!text) return null
 
@@ -116,14 +141,22 @@ export function parseRelativeDate(phrase: string, today: Date = new Date()): Par
     const lastMod = /\blast\b/.test(text) && !lastWeek
     const nextMod = /\bnext\b/.test(text)
 
-    const weekStart = startOfWeek(today, { weekStartsOn: 0 })
-
-    if (lastWeek) return out(addDays(subWeeks(weekStart, 1), weekday.index))
-    if (thisWeek) return out(addDays(weekStart, weekday.index))
+    // "last monday"/"next tuesday" are relative to now, so always anchor on today.
     if (nextMod) return out(nextWeekday(today, weekday.index))
     if (lastMod) return out(mostRecentWeekday(today, weekday.index))
 
-    // Bare weekday → the occurrence within the current payroll week.
+    // When viewing a specific week, anchor week-relative phrases to that week's
+    // actual span (which may start Sunday or Monday). Scan the window so the
+    // mapping is correct regardless of alignment.
+    if (weekAnchor) {
+      if (lastWeek) return out(weekdayWithinWeek(subWeeks(weekAnchor, 1), weekday.index))
+      return out(weekdayWithinWeek(weekAnchor, weekday.index)) // bare or "this week"
+    }
+
+    // No viewed week → fall back to the calendar week containing today.
+    const weekStart = startOfWeek(today, { weekStartsOn: 0 })
+    if (lastWeek) return out(addDays(subWeeks(weekStart, 1), weekday.index))
+    if (thisWeek) return out(addDays(weekStart, weekday.index))
     return out(addDays(weekStart, weekday.index))
   }
 

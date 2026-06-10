@@ -29,6 +29,21 @@ check('m/d', parseRelativeDate('3/11', today)?.iso, '2026-03-11')
 check('next tuesday', parseRelativeDate('next tuesday', today)?.iso, '2026-06-09')
 check('garbage → null', parseRelativeDate('whenever', today), null)
 
+// Week-anchored resolution: user is viewing the Mon 6/1 → Sun 6/7 week while
+// "today" is later (Jun 10). Bare/relative weekdays must anchor to the VIEWED
+// week, not the calendar week containing today. (Regression: "monday" used to
+// resolve to Jun 8 — outside the viewed week — when today was Jun 10.)
+const jun10 = new Date('2026-06-10T12:00:00') // a Wednesday
+const viewedWeek = new Date('2026-06-01T00:00:00') // week_start, a Monday
+check('anchored "monday" → viewed week', parseRelativeDate('monday', jun10, viewedWeek)?.iso, '2026-06-01')
+check('anchored "sunday" → viewed week end', parseRelativeDate('sunday', jun10, viewedWeek)?.iso, '2026-06-07')
+check('anchored "this week wednesday"', parseRelativeDate('wednesday this week', jun10, viewedWeek)?.iso, '2026-06-03')
+check('anchored "monday of last week"', parseRelativeDate('monday of last week', jun10, viewedWeek)?.iso, '2026-05-25')
+// "last/next <weekday>" stay relative to today even when a week is viewed.
+check('anchored "last friday" still today-relative', parseRelativeDate('last friday', jun10, viewedWeek)?.iso, '2026-06-05')
+// Without an anchor, behavior is unchanged (calendar week of today, Jun 10).
+check('unanchored "monday" → today’s week', parseRelativeDate('monday', jun10)?.iso, '2026-06-08')
+
 // Fuzzy matching against the real roster.
 const employees = [
   'Alex', 'Angel Salazar', 'Carlos Nieves', 'Christian Arevalo', 'Darwin Montesdeoca',

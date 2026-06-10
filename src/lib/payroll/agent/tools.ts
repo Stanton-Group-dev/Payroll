@@ -5,6 +5,7 @@
  * preview (never executing inside the agent turn). All execution flows back
  * through the audited operation layer on explicit user confirmation.
  */
+import { parseISO } from 'date-fns'
 import type { OperationContext } from '@/lib/payroll/operations/core'
 import { listOperations } from '@/lib/payroll/operations'
 import {
@@ -197,11 +198,19 @@ export function buildTools(mode: AgentMode = 'full'): ToolDef[] {
   return [...readTools, proposeOperation]
 }
 
-export function systemPrompt(today: Date, mode: AgentMode = 'full'): string {
+export function systemPrompt(
+  today: Date,
+  mode: AgentMode = 'full',
+  weekContext?: { weekStart: string; weekEnd: string } | null
+): string {
   const iso = today.toISOString().slice(0, 10)
+  const viewedWeek = weekContext
+    ? `The user is currently viewing the payroll week of ${weekContext.weekStart} through ${weekContext.weekEnd}. Bare or relative weekday phrases ("monday", "wednesday", "this week") refer to THIS week, not the calendar week containing today. The resolvers already anchor to it — just pass the phrase. Phrases like "today", "yesterday", "last friday", or an explicit date are still literal.`
+    : ''
   const common = [
     'You are the payroll assistant for Stanton Management.',
     `Today is ${iso}. Payroll weeks run Sunday through Saturday.`,
+    ...(viewedWeek ? ['', viewedWeek] : []),
     '',
     'Reading & reporting (always available):',
     '- Never invent ids. Use resolve_employee / resolve_property / resolve_portfolio to turn names into ids, and resolve_date / resolve_date_range to turn phrases into ISO dates and payroll weeks.',
@@ -232,12 +241,18 @@ export function systemPrompt(today: Date, mode: AgentMode = 'full'): string {
   ].join('\n')
 }
 
-/** Execute a non-terminal tool call and return content to feed back to the model. */
+/**
+ * Execute a non-terminal tool call and return content to feed back to the model.
+ * `weekAnchorIso` is the Sunday week_start of the week the user is viewing, used
+ * to anchor bare/relative weekday phrases ("monday", "this week") to that week.
+ */
 export async function dispatchTool(
   ctx: OperationContext,
   name: string,
-  input: Record<string, unknown>
+  input: Record<string, unknown>,
+  weekAnchorIso?: string | null
 ): Promise<ToolOutcome> {
+  const weekAnchor = weekAnchorIso ? parseISO(weekAnchorIso) : undefined
   switch (name) {
     case 'resolve_employee': {
       const res = await resolveEmployee(ctx, String(input.query ?? ''), Boolean(input.includeInactive))
@@ -282,7 +297,7 @@ export async function dispatchTool(
       return ok({ status: res.status, candidates: candidateSummary(res.candidates) })
     }
     case 'resolve_date': {
-      const parsed = parseRelativeDate(String(input.phrase ?? ''))
+      const parsed = parseRelativeDate(String(input.phrase ?? ''), new Date(), weekAnchor)
       if (!parsed) return ok({ status: 'unparsed', message: 'Could not parse that date.' })
       const week = await resolveWeekForDate(ctx, parsed.iso)
       return ok({
@@ -311,11 +326,11 @@ export async function dispatchTool(
       const opts: { lastNWeeks?: number; fromDate?: string; toDate?: string } = {}
       if (typeof input.lastNWeeks === 'number') opts.lastNWeeks = input.lastNWeeks
       if (input.fromPhrase) {
-        const p = parseRelativeDate(String(input.fromPhrase))
+        const p = parseRelativeDate(String(input.fromPhrase), new Date(), weekAnchor)
         if (p) opts.fromDate = p.iso
       }
       if (input.toPhrase) {
-        const p = parseRelativeDate(String(input.toPhrase))
+        const p = parseRelativeDate(String(input.toPhrase), new Date(), weekAnchor)
         if (p) opts.toDate = p.iso
       }
       const weeks = await resolveWeeks(ctx, opts)

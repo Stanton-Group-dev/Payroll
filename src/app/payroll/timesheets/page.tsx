@@ -268,7 +268,16 @@ function TimesheetsPageContent() {
                 {/* Panels */}
                 {!isLocked && (
                   <div className="p-6 space-y-4">
-                    {isSuperAdmin && <CommandBar onExecuted={refetch} />}
+                    {isSuperAdmin && (
+                      <CommandBar
+                        onExecuted={refetch}
+                        weekContext={
+                          selectedWeek
+                            ? { weekStart: selectedWeek.week_start, weekEnd: selectedWeek.week_end }
+                            : null
+                        }
+                      />
+                    )}
                     <ManualAddPanel
                       employees={employees}
                       properties={properties}

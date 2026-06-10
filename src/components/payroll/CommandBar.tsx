@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Sparkles, Send, X, AlertTriangle, Check } from 'lucide-react'
 import { FormButton, InfoBlock } from '@/components/form'
-import { usePayrollAgent } from '@/hooks/payroll/usePayrollAgent'
+import { usePayrollAgent, type WeekContext } from '@/hooks/payroll/usePayrollAgent'
 
 /**
  * Natural-language command bar. The manager types a request like
@@ -11,11 +11,19 @@ import { usePayrollAgent } from '@/hooks/payroll/usePayrollAgent'
  * the assistant resolves it and shows a preview that must be confirmed before
  * anything is written. Every confirmed action is audited server-side.
  *
- * Pass `onExecuted` to refresh page data after a successful write.
+ * Pass `onExecuted` to refresh page data after a successful write, and
+ * `weekContext` (the viewed week) so weekday phrases anchor to it rather than
+ * the calendar week containing today.
  */
-export function CommandBar({ onExecuted }: { onExecuted?: () => void }) {
+export function CommandBar({
+  onExecuted,
+  weekContext,
+}: {
+  onExecuted?: () => void
+  weekContext?: WeekContext | null
+}) {
   const { messages, proposal, thinking, executing, error, send, confirm, cancel } =
-    usePayrollAgent({ mode: 'full', onExecuted })
+    usePayrollAgent({ mode: 'full', onExecuted, weekContext })
   const [text, setText] = useState('')
   const logRef = useRef<HTMLDivElement>(null)
 

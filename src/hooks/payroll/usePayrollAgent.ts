@@ -33,6 +33,12 @@ export interface AgentProposal {
 /** 'report' = read-only Q&A (manager+); 'full' = read + write proposals (super-admin). */
 export type AgentMode = 'report' | 'full'
 
+/** The payroll week the user is viewing, so weekday phrases anchor to it. */
+export interface WeekContext {
+  weekStart: string
+  weekEnd: string
+}
+
 /**
  * Drives the natural-language command bar / console: send a message, receive
  * either a clarifying reply or a proposed operation + preview, then confirm to
@@ -41,9 +47,9 @@ export type AgentMode = 'report' | 'full'
  * never appear.
  */
 export function usePayrollAgent(
-  opts: { mode?: AgentMode; onExecuted?: () => void } = {}
+  opts: { mode?: AgentMode; onExecuted?: () => void; weekContext?: WeekContext | null } = {}
 ) {
-  const { mode = 'report', onExecuted } = opts
+  const { mode = 'report', onExecuted, weekContext = null } = opts
   const [messages, setMessages] = useState<ChatTurn[]>([])
   const [proposal, setProposal] = useState<AgentProposal | null>(null)
   const [thinking, setThinking] = useState(false)
@@ -63,7 +69,7 @@ export function usePayrollAgent(
         const res = await fetch('/api/payroll/agent', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: next, mode }),
+          body: JSON.stringify({ messages: next, mode, weekContext }),
         })
         const data = await res.json()
         if (!res.ok) throw new Error(data.error ?? 'Command failed')
@@ -77,7 +83,7 @@ export function usePayrollAgent(
         setThinking(false)
       }
     },
-    [messages, thinking, mode]
+    [messages, thinking, mode, weekContext]
   )
 
   const confirm = useCallback(async () => {
