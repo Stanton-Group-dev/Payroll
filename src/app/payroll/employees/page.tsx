@@ -41,6 +41,14 @@ const columns: Column<PayrollEmployee & Record<string, unknown>>[] = [
   { key: 'name', label: 'Name', width: 180 },
   { key: 'type', label: 'Type', width: 100, render: (v) => <span className="capitalize">{String(v)}</span> },
   {
+    key: 'pay_group', label: 'Pay Group', width: 100,
+    render: (v) => (
+      <span className={`capitalize text-xs px-1.5 py-0.5 ${v === 'remote' ? 'bg-[var(--accent)]/20 text-[var(--accent)]' : 'text-[var(--muted)]'}`}>
+        {String(v ?? 'field')}
+      </span>
+    ),
+  },
+  {
     key: 'hourly_rate', label: 'Rate', width: 100,
     render: (v, row) => {
       if (row.type === 'salaried') return row.weekly_rate ? `$${Number(row.weekly_rate).toFixed(2)}/wk` : '—'
@@ -68,7 +76,7 @@ const columns: Column<PayrollEmployee & Record<string, unknown>>[] = [
 ]
 
 const emptyEmployee: Partial<PayrollEmployee> = {
-  name: '', workyard_id: '', type: 'hourly',
+  name: '', workyard_id: '', monitask_id: '', type: 'hourly', pay_group: 'field',
   hourly_rate: undefined, weekly_rate: undefined,
   trade: '', is_active: true,
   ot_allowed: false, pay_tax: false, wc: false,
@@ -223,7 +231,14 @@ export default function EmployeesPage() {
     setSaving(true)
     setError(null)
     try {
-      const savedId = await upsertEmployee(editing)
+      // Empty external ids must be NULL, not '' — both columns are uniquely indexed.
+      const toSave: Partial<PayrollEmployee> = {
+        ...editing,
+        workyard_id: editing.workyard_id?.trim() ? editing.workyard_id.trim() : null,
+        monitask_id: editing.monitask_id?.trim() ? editing.monitask_id.trim() : null,
+        pay_group: editing.pay_group ?? 'field',
+      }
+      const savedId = await upsertEmployee(toSave)
       if (newRate && savedId) {
         await addRate({
           employee_id: savedId,
@@ -469,6 +484,24 @@ export default function EmployeesPage() {
             <option value="contractor">Contractor</option>
           </FormSelect>
         </FormField>
+        <FormField label="Pay Group" required helperText="Remote workers are paid on a separate run (self-submitted hours + Monitask)">
+          <FormSelect
+            value={editing.pay_group ?? 'field'}
+            onChange={e => setEditing(p => ({ ...p, pay_group: e.target.value as PayrollEmployee['pay_group'] }))}
+          >
+            <option value="field">Field (Workyard)</option>
+            <option value="remote">Remote (Monitask)</option>
+          </FormSelect>
+        </FormField>
+        {editing.pay_group === 'remote' && (
+          <FormField label="Monitask User ID" helperText="Used to match Monitask activity to this worker">
+            <FormInput
+              value={editing.monitask_id ?? ''}
+              onChange={e => setEditing(p => ({ ...p, monitask_id: e.target.value }))}
+              className="font-mono"
+            />
+          </FormField>
+        )}
 
         {editing.type !== 'salaried' ? (
           <FormField label="Hourly Rate ($)">

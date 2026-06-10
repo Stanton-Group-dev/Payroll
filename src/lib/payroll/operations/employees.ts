@@ -12,6 +12,7 @@ import { z } from 'zod'
 import type { Operation, OperationContext, Plan, PlannedChange } from './core'
 
 const EMPLOYEE_TYPE = z.enum(['hourly', 'salaried', 'contractor'])
+const PAY_GROUP = z.enum(['field', 'remote'])
 const RATE = z.number().nonnegative('rate cannot be negative').max(100000, 'rate looks too large')
 const NAME = z.string().trim().min(1, 'name is required').max(200)
 
@@ -34,10 +35,12 @@ interface EmployeeRow {
   id: string
   name: string
   type: 'hourly' | 'salaried' | 'contractor'
+  pay_group: 'field' | 'remote'
   hourly_rate: number | null
   weekly_rate: number | null
   trade: string | null
   workyard_id: string | null
+  monitask_id: string | null
   is_active: boolean
   ot_allowed: boolean
   pay_tax: boolean
@@ -46,7 +49,7 @@ interface EmployeeRow {
 }
 
 const EMPLOYEE_COLUMNS =
-  'id, name, type, hourly_rate, weekly_rate, trade, workyard_id, is_active, ot_allowed, pay_tax, wc, is_management'
+  'id, name, type, pay_group, hourly_rate, weekly_rate, trade, workyard_id, monitask_id, is_active, ot_allowed, pay_tax, wc, is_management'
 
 async function loadEmployee(ctx: OperationContext, id: string): Promise<EmployeeRow | null> {
   const { data, error } = await ctx.supabase
@@ -94,10 +97,12 @@ export const addEmployeeSchema = z
   .object({
     name: NAME,
     type: EMPLOYEE_TYPE,
+    payGroup: PAY_GROUP.default('field'),
     hourlyRate: RATE.optional(),
     weeklyRate: RATE.optional(),
     trade: z.string().trim().max(100).optional(),
     workyardId: z.string().trim().min(1).max(100).optional(),
+    monitaskId: z.string().trim().min(1).max(100).optional(),
     otAllowed: z.boolean().default(false),
     payTax: z.boolean().default(false),
     wc: z.boolean().default(false),
@@ -147,6 +152,16 @@ export const addEmployee: Operation<AddEmployeeInput, AddEmployeeResult> = {
       if (sameWy) blockers.push(`Workyard id ${input.workyardId} is already used by ${sameWy.name}`)
     }
 
+    if (input.monitaskId) {
+      const { data: sameMt, error: mtErr } = await ctx.supabase
+        .from('payroll_employees')
+        .select('id, name')
+        .eq('monitask_id', input.monitaskId)
+        .maybeSingle()
+      if (mtErr) throw new Error(`Failed to check Monitask id: ${mtErr.message}`)
+      if (sameMt) blockers.push(`Monitask id ${input.monitaskId} is already used by ${sameMt.name}`)
+    }
+
     const rate = rateForType(input.type, input.hourlyRate, input.weeklyRate)
     const effectiveDate = today()
     const rateLabel =
@@ -156,13 +171,15 @@ export const addEmployee: Operation<AddEmployeeInput, AddEmployeeResult> = {
           ? `$${rate.value}/wk`
           : `$${rate.value}/hr`
 
+    const groupLabel = input.payGroup === 'remote' ? ' [remote]' : ''
     changes.push({
       kind: 'create',
       entity: 'employee',
-      description: `Create ${input.type} employee "${input.name}" (${rateLabel})`,
+      description: `Create ${input.type} employee "${input.name}" (${rateLabel})${groupLabel}`,
       after: {
         name: input.name,
         type: input.type,
+        pay_group: input.payGroup,
         [rate.column]: rate.value,
         is_management: input.isManagement,
       },
@@ -191,10 +208,12 @@ export const addEmployee: Operation<AddEmployeeInput, AddEmployeeResult> = {
           .insert({
             name: input.name,
             type: input.type,
+            pay_group: input.payGroup,
             hourly_rate: input.type === 'salaried' ? null : (input.hourlyRate ?? null),
             weekly_rate: input.type === 'salaried' ? (input.weeklyRate ?? null) : null,
             trade: input.trade ?? null,
             workyard_id: input.workyardId ?? null,
+            monitask_id: input.monitaskId ?? null,
             ot_allowed: input.otAllowed,
             pay_tax: input.payTax,
             wc: input.wc,
@@ -221,10 +240,12 @@ export const updateEmployeeSchema = z
     employeeId: z.string().uuid(),
     name: NAME.optional(),
     type: EMPLOYEE_TYPE.optional(),
+    payGroup: PAY_GROUP.optional(),
     hourlyRate: RATE.optional(),
     weeklyRate: RATE.optional(),
     trade: z.string().trim().max(100).nullable().optional(),
     workyardId: z.string().trim().min(1).max(100).nullable().optional(),
+    monitaskId: z.string().trim().min(1).max(100).nullable().optional(),
     otAllowed: z.boolean().optional(),
     payTax: z.boolean().optional(),
     wc: z.boolean().optional(),
@@ -266,6 +287,10 @@ export const updateEmployee: Operation<UpdateEmployeeInput, { employeeId: string
         update.type = input.type
         changes.push({ kind: 'update', entity: 'employee', description: `type ${emp.type} → ${input.type}` })
       }
+      if (input.payGroup !== undefined && input.payGroup !== emp.pay_group) {
+        update.pay_group = input.payGroup
+        changes.push({ kind: 'update', entity: 'employee', description: `pay group ${emp.pay_group} → ${input.payGroup}` })
+      }
       if (input.trade !== undefined && input.trade !== emp.trade) {
         update.trade = input.trade
         changes.push({ kind: 'update', entity: 'employee', description: `trade ${emp.trade ?? '—'} → ${input.trade ?? '—'}` })
@@ -283,6 +308,20 @@ export const updateEmployee: Operation<UpdateEmployeeInput, { employeeId: string
         }
         update.workyard_id = input.workyardId
         changes.push({ kind: 'update', entity: 'employee', description: `Workyard id ${emp.workyard_id ?? '—'} → ${input.workyardId ?? '—'}` })
+      }
+      if (input.monitaskId !== undefined && input.monitaskId !== emp.monitask_id) {
+        if (input.monitaskId) {
+          const { data: clash, error: mtErr } = await ctx.supabase
+            .from('payroll_employees')
+            .select('id, name')
+            .eq('monitask_id', input.monitaskId)
+            .neq('id', emp.id)
+            .maybeSingle()
+          if (mtErr) throw new Error(`Failed to check Monitask id: ${mtErr.message}`)
+          if (clash) blockers.push(`Monitask id ${input.monitaskId} is already used by ${clash.name}`)
+        }
+        update.monitask_id = input.monitaskId
+        changes.push({ kind: 'update', entity: 'employee', description: `Monitask id ${emp.monitask_id ?? '—'} → ${input.monitaskId ?? '—'}` })
       }
       for (const [field, col, before] of [
         ['otAllowed', 'ot_allowed', emp.ot_allowed],

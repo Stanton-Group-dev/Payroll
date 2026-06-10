@@ -1,4 +1,7 @@
 export type EmployeeType = 'hourly' | 'salaried' | 'contractor'
+/** Which payroll run an employee/week belongs to. 'field' is the default (Workyard);
+ *  'remote' is the separate run driven by self-submitted hours + Monitask reference. */
+export type PayGroup = 'field' | 'remote'
 export type WeekStatus = 'draft' | 'corrections_complete' | 'payroll_approved' | 'invoiced' | 'statement_sent'
 export type TimeEntrySource =
   | 'workyard'
@@ -8,8 +11,11 @@ export type TimeEntrySource =
   | 'manual_spread'
   | 'sms_employee'
   | 'mileage_workyard'
+  | 'monitask' // Monitask activity imported as a paid entry (rare; reference is preferred)
+  | 'monitask_api' // Monitask activity pulled via API (reference)
+  | 'remote_submitted' // remote worker's self-submitted hours (default paid)
   | 'manual' // legacy
-export type AdjustmentType = 'phone' | 'tool' | 'advance' | 'deduction_other' | 'expense_reimbursement'
+export type AdjustmentType = 'phone' | 'tool' | 'advance' | 'deduction_other' | 'expense_reimbursement' | 'bonus'
 export type AllocationMethod = 'employee_pay' | 'unit_weighted' | 'direct'
 export type InvoiceStatus = 'draft' | 'approved' | 'sent'
 export type CostType = 'labor' | 'spread' | 'mgmt_fee'
@@ -49,7 +55,9 @@ export interface PayrollEmployee {
   id: string
   name: string
   workyard_id: string | null
+  monitask_id: string | null
   type: EmployeeType
+  pay_group: PayGroup
   hourly_rate: number | null
   weekly_rate: number | null
   trade: string | null
@@ -71,6 +79,39 @@ export interface PayrollEmployeeRate {
   created_by: string | null
 }
 
+/** Monitask activity for a remote worker on a given day. Reference only — used by
+ *  the optional overpay check; never auto-paid. Paid hours come from time entries
+ *  with source='remote_submitted'. */
+export interface MonitaskActivity {
+  id: string
+  employee_id: string
+  payroll_week_id: string | null
+  entry_date: string
+  active_hours: number
+  productivity_pct: number | null
+  raw: Record<string, unknown> | null
+  created_at: string
+  created_by: string | null
+  employee?: PayrollEmployee
+}
+
+/** The standing bonus arrangement for a remote worker. Per-run bonus payouts are
+ *  entered as payroll_adjustments with type='bonus'. */
+export type RemoteBonusBasis = 'manual' | 'per_week' | 'per_hour' | 'pct_of_pay'
+
+export interface RemoteBonusConfig {
+  id: string
+  employee_id: string
+  structure_note: string
+  target_amount: number | null
+  basis: RemoteBonusBasis
+  is_active: boolean
+  effective_date: string
+  created_at: string
+  created_by: string | null
+  employee?: PayrollEmployee
+}
+
 export interface PayrollEmployeeDeptSplit {
   id: string
   employee_id: string
@@ -86,6 +127,7 @@ export interface PayrollWeek {
   week_start: string
   week_end: string
   status: WeekStatus
+  pay_group: PayGroup
   created_at: string
   updated_at: string
   created_by: string | null

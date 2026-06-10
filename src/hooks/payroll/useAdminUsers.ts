@@ -11,12 +11,26 @@ export interface UserRow {
   role: UserRole
   is_active: boolean
   created_at: string
+  portfolio_ids: string[]
   portfolio_names: string[]
 }
 
 export interface PortfolioOption {
   id: string
   name: string
+}
+
+/** POST an admin action to the server route (service-role gated, admin-only). */
+async function adminAction(payload: Record<string, unknown>): Promise<void> {
+  const res = await fetch('/api/admin/users', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({}))
+    throw new Error(json.error ?? `Request failed (${res.status})`)
+  }
 }
 
 export function useAdminUsers() {
@@ -47,59 +61,61 @@ export function useAdminUsers() {
     const portMap: Record<string, string> = {}
     for (const p of allPortfolios) portMap[p.id] = p.name
 
-    setUsers((profilesRes.data ?? []).map(p => ({
-      id: p.id,
-      email: p.email,
-      full_name: p.full_name,
-      role: (p.role as UserRole) ?? 'manager',
-      is_active: p.is_active ?? true,
-      created_at: p.created_at,
-      portfolio_names: (puMap[p.id] ?? []).map(pid => portMap[pid] ?? pid).filter(Boolean),
-    })))
+    setUsers((profilesRes.data ?? []).map(p => {
+      const ids = puMap[p.id] ?? []
+      return {
+        id: p.id,
+        email: p.email,
+        full_name: p.full_name,
+        role: (p.role as UserRole) ?? 'manager',
+        is_active: p.is_active ?? true,
+        created_at: p.created_at,
+        portfolio_ids: ids,
+        portfolio_names: ids.map(pid => portMap[pid] ?? pid).filter(Boolean),
+      }
+    }))
     setLoading(false)
   }, [])
 
   useEffect(() => { load() }, [load])
 
-  const inviteUser = useCallback(async (email: string, fullName: string, role: UserRole) => {
-    const supabase = createClient()
-    const { data, error: invErr } = await supabase.auth.admin.inviteUserByEmail(email.trim(), {
-      data: { full_name: fullName },
-    })
-    if (invErr) throw new Error(invErr.message)
-    if (data.user) {
-      await supabase.from('profiles').upsert({
-        id: data.user.id,
-        email: email.trim(),
-        full_name: fullName || null,
-        role,
-        is_active: true,
-      })
-    }
+  const inviteUser = useCallback(async (email: string, fullName: string, role: UserRole, portfolioIds: string[] = []) => {
+    await adminAction({ action: 'invite', email: email.trim(), fullName, role, portfolioIds })
     await load()
   }, [load])
 
-  const updateUser = useCallback(async (userId: string, fullName: string, role: UserRole) => {
-    const supabase = createClient()
-    const { error: upErr } = await supabase.from('profiles').update({
-      full_name: fullName || null,
-      role,
-    }).eq('id', userId)
-    if (upErr) throw new Error(upErr.message)
+  const updateUser = useCallback(async (userId: string, fullName: string, role: UserRole, portfolioIds: string[] = []) => {
+    await adminAction({ action: 'update', userId, fullName, role, portfolioIds })
     await load()
   }, [load])
 
   const deactivateUser = useCallback(async (userId: string) => {
-    const supabase = createClient()
-    await supabase.from('profiles').update({ is_active: false }).eq('id', userId)
+    await adminAction({ action: 'setActive', userId, isActive: false })
     await load()
   }, [load])
 
   const reactivateUser = useCallback(async (userId: string) => {
-    const supabase = createClient()
-    await supabase.from('profiles').update({ is_active: true }).eq('id', userId)
+    await adminAction({ action: 'setActive', userId, isActive: true })
     await load()
   }, [load])
 
-  return { users, portfolios, loading, error, inviteUser, updateUser, deactivateUser, reactivateUser, refetch: load }
+  const resetPassword = useCallback(async (email: string) => {
+    await adminAction({ action: 'resetPassword', email: email.trim() })
+  }, [])
+
+  const resendInvite = useCallback(async (email: string, fullName: string) => {
+    await adminAction({ action: 'resendInvite', email: email.trim(), fullName })
+  }, [])
+
+  const deleteUser = useCallback(async (userId: string) => {
+    await adminAction({ action: 'delete', userId })
+    await load()
+  }, [load])
+
+  return {
+    users, portfolios, loading, error,
+    inviteUser, updateUser, deactivateUser, reactivateUser,
+    resetPassword, resendInvite, deleteUser,
+    refetch: load,
+  }
 }

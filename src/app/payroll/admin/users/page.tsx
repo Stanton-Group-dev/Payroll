@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Plus, Pencil, ShieldCheck, Mail } from 'lucide-react'
+import { Plus, Pencil, ShieldCheck, Mail, Trash2 } from 'lucide-react'
 import { useAdminUsers, type UserRow } from '@/hooks/payroll/useAdminUsers'
 import { useAuth, type UserRole } from '@/hooks/payroll/useAuth'
 import {
@@ -15,6 +15,8 @@ const ROLE_LABELS: Record<UserRole, string> = {
   admin: 'Admin',
   manager: 'Manager',
   bookkeeper: 'Bookkeeper',
+  analyst: 'Payroll Analyst',
+  worker: 'Remote Worker',
 }
 
 const ROLE_DESCRIPTIONS: Record<UserRole, string> = {
@@ -22,17 +24,24 @@ const ROLE_DESCRIPTIONS: Record<UserRole, string> = {
   admin: 'Full access — config, approvals, rate management, user admin',
   manager: 'Portfolio visibility, corrections, approvals, cost monitoring',
   bookkeeper: 'ADP export, upload ADP report, reconciliation view (read-only otherwise)',
+  analyst: 'Remote payroll run — bonuses, Monitask-vs-submitted review. No field payroll or user admin.',
+  worker: 'Remote worker — self-service hours portal only (not a staff console login)',
 }
 
-// Roles that can be assigned through this UI. superadmin is intentionally
-// excluded — it is granted directly in the database, not via the invite form.
-const ASSIGNABLE_ROLES: UserRole[] = ['admin', 'manager', 'bookkeeper']
+// Roles that can be assigned through this UI. superadmin is granted directly in
+// the database; 'worker' is provisioned via the remote portal, not invited here.
+const ASSIGNABLE_ROLES: UserRole[] = ['admin', 'manager', 'analyst', 'bookkeeper']
 
 const empty = { email: '', full_name: '', role: 'manager' as UserRole, portfolio_ids: [] as string[] }
 
 export default function UsersPage() {
   const { profile: currentProfile, isAdmin } = useAuth()
-  const { users, portfolios, loading, inviteUser, updateUser, deactivateUser, reactivateUser } = useAdminUsers()
+  const {
+    users, portfolios, loading,
+    inviteUser, updateUser, deactivateUser, reactivateUser,
+    resetPassword, resendInvite, deleteUser,
+  } = useAdminUsers()
+  const [notice, setNotice] = useState<string | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState(empty)
@@ -50,7 +59,7 @@ export default function UsersPage() {
 
   const openEdit = (u: UserRow) => {
     setEditingId(u.id)
-    setForm({ email: u.email ?? '', full_name: u.full_name ?? '', role: u.role, portfolio_ids: [] })
+    setForm({ email: u.email ?? '', full_name: u.full_name ?? '', role: u.role, portfolio_ids: u.portfolio_ids })
     setError(null)
     setInviteMode(false)
     setDrawerOpen(true)
@@ -61,15 +70,16 @@ export default function UsersPage() {
     if (inviteMode && !form.email.trim()) { setError('Email is required'); return }
     setSaving(true)
     try {
+      const portfolioIds = form.role === 'admin' ? [] : form.portfolio_ids
       if (inviteMode) {
-        await inviteUser(form.email.trim(), form.full_name, form.role)
+        await inviteUser(form.email.trim(), form.full_name, form.role, portfolioIds)
       } else if (editingId) {
-        if (editingId === currentProfile?.id && form.role !== 'admin') {
+        if (editingId === currentProfile?.id && form.role !== 'admin' && form.role !== 'superadmin') {
           setError('You cannot remove your own admin role')
           setSaving(false)
           return
         }
-        await updateUser(editingId, form.full_name, form.role)
+        await updateUser(editingId, form.full_name, form.role, portfolioIds)
       }
       setDrawerOpen(false)
     } catch (e: unknown) {
@@ -88,10 +98,44 @@ export default function UsersPage() {
     await reactivateUser(userId)
   }
 
+  const handleResetPassword = async (u: UserRow) => {
+    if (!u.email) return
+    setNotice(null)
+    try {
+      await resetPassword(u.email)
+      setNotice(`Password reset email sent to ${u.email}`)
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : 'Failed to send reset email')
+    }
+  }
+
+  const handleResendInvite = async (u: UserRow) => {
+    if (!u.email) return
+    setNotice(null)
+    try {
+      await resendInvite(u.email, u.full_name ?? '')
+      setNotice(`Invitation re-sent to ${u.email}`)
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : 'Failed to resend invite')
+    }
+  }
+
+  const handleDelete = async (u: UserRow) => {
+    if (u.id === currentProfile?.id) return
+    if (!window.confirm(`Permanently delete ${u.full_name ?? u.email ?? 'this user'}? This cannot be undone.`)) return
+    setNotice(null)
+    try {
+      await deleteUser(u.id)
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : 'Failed to delete user')
+    }
+  }
+
   const roleBadgeColor = (role: UserRole) => {
     if (role === 'superadmin') return 'bg-[var(--ink)] text-white'
     if (role === 'admin') return 'bg-[var(--primary)] text-white'
     if (role === 'manager') return 'bg-[var(--accent)]/20 text-[var(--accent)]'
+    if (role === 'analyst') return 'bg-[var(--success)]/20 text-[var(--success)]'
     return 'bg-[var(--bg-section)] text-[var(--muted)]'
   }
 
@@ -115,6 +159,12 @@ export default function UsersPage() {
           <InfoBlock variant="warning" title="Admin access required">
             Only admins can manage users and roles.
           </InfoBlock>
+        )}
+
+        {notice && (
+          <div className="mb-4 cursor-pointer" onClick={() => setNotice(null)}>
+            <InfoBlock variant="success">{notice}</InfoBlock>
+          </div>
         )}
 
         <div className="mb-6 grid grid-cols-3 gap-4">
@@ -173,20 +223,31 @@ export default function UsersPage() {
                     </td>
                     <td className="px-4 py-3 text-right">
                       {isAdmin && (
-                        <div className="flex items-center justify-end gap-2">
-                          <button onClick={() => openEdit(u)} className="text-[var(--muted)] hover:text-[var(--primary)] transition-colors">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button onClick={() => openEdit(u)} title="Edit" className="text-[var(--muted)] hover:text-[var(--primary)] transition-colors">
                             <Pencil size={13} />
                           </button>
+                          <FormButton size="sm" variant="ghost" onClick={() => handleResetPassword(u)}>
+                            Reset PW
+                          </FormButton>
+                          <FormButton size="sm" variant="ghost" onClick={() => handleResendInvite(u)}>
+                            Resend
+                          </FormButton>
                           {u.id !== currentProfile?.id && (
-                            u.is_active ? (
-                              <FormButton size="sm" variant="ghost" onClick={() => handleDeactivate(u.id)}>
-                                Deactivate
-                              </FormButton>
-                            ) : (
-                              <FormButton size="sm" variant="ghost" onClick={() => handleReactivate(u.id)}>
-                                Reactivate
-                              </FormButton>
-                            )
+                            <>
+                              {u.is_active ? (
+                                <FormButton size="sm" variant="ghost" onClick={() => handleDeactivate(u.id)}>
+                                  Deactivate
+                                </FormButton>
+                              ) : (
+                                <FormButton size="sm" variant="ghost" onClick={() => handleReactivate(u.id)}>
+                                  Reactivate
+                                </FormButton>
+                              )}
+                              <button onClick={() => handleDelete(u)} title="Delete" className="text-[var(--muted)] hover:text-[var(--error)] transition-colors">
+                                <Trash2 size={13} />
+                              </button>
+                            </>
                           )}
                         </div>
                       )}
@@ -229,9 +290,9 @@ export default function UsersPage() {
 
         <FormField label="Role" required>
           <FormSelect value={form.role} onChange={e => setForm(p => ({ ...p, role: e.target.value as UserRole }))}>
-            <option value="admin">Admin — full access</option>
-            <option value="manager">Manager — operations + approvals</option>
-            <option value="bookkeeper">Bookkeeper — ADP + reconciliation</option>
+            {ASSIGNABLE_ROLES.map(role => (
+              <option key={role} value={role}>{ROLE_LABELS[role]}</option>
+            ))}
           </FormSelect>
           <p className="text-xs text-[var(--muted)] mt-1">{ROLE_DESCRIPTIONS[form.role]}</p>
         </FormField>

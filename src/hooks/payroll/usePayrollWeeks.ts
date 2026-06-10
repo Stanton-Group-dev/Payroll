@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import type { PayrollWeek } from '@/lib/supabase/types'
+import type { PayrollWeek, PayGroup } from '@/lib/supabase/types'
 
 export function usePayrollWeeks() {
   const [weeks, setWeeks] = useState<PayrollWeek[]>([])
@@ -24,11 +24,11 @@ export function usePayrollWeeks() {
 
   useEffect(() => { fetch() }, [fetch])
 
-  const createWeek = useCallback(async (weekStart: string, weekEnd: string) => {
+  const createWeek = useCallback(async (weekStart: string, weekEnd: string, payGroup: PayGroup = 'field') => {
     const supabase = createClient()
     const { data, error: err } = await supabase
       .from('payroll_weeks')
-      .insert({ week_start: weekStart, week_end: weekEnd, status: 'draft' })
+      .insert({ week_start: weekStart, week_end: weekEnd, status: 'draft', pay_group: payGroup })
       .select()
       .single()
     if (err) throw new Error(err.message)

@@ -17,6 +17,7 @@ import {
   deactivateExternalProject,
   reactivateExternalProject,
 } from './externalProjects'
+import { setBonusConfig, addBonus } from './bonuses'
 
 /**
  * Type-erased operation handle. Each operation validates its own input via its
@@ -31,7 +32,10 @@ export type RegisteredOperation = Operation<unknown, unknown>
  * payroll console; previewOperation/executeOperation enforce it centrally.
  */
 function register(op: Operation<never, never>, minRole: ConsoleRole): RegisteredOperation {
-  return { ...(op as unknown as RegisteredOperation), minRole }
+  const reg = op as unknown as RegisteredOperation
+  // An operation that carries its own allowRoles (a lateral role like 'analyst')
+  // gates on that list; don't overwrite it with a linear minRole.
+  return reg.allowRoles ? { ...reg } : { ...reg, minRole }
 }
 
 const REGISTRY: Record<string, RegisteredOperation> = {
@@ -49,6 +53,9 @@ const REGISTRY: Record<string, RegisteredOperation> = {
   [updateExternalProject.name]: register(updateExternalProject as unknown as Operation<never, never>, 'admin'),
   [deactivateExternalProject.name]: register(deactivateExternalProject as unknown as Operation<never, never>, 'admin'),
   [reactivateExternalProject.name]: register(reactivateExternalProject as unknown as Operation<never, never>, 'admin'),
+  // Remote-worker bonuses — the analyst's audited toolset (allowRoles gates these).
+  [setBonusConfig.name]: register(setBonusConfig as unknown as Operation<never, never>, 'admin'),
+  [addBonus.name]: register(addBonus as unknown as Operation<never, never>, 'admin'),
 }
 
 export function getOperation(name: string): RegisteredOperation | null {
@@ -67,4 +74,5 @@ export {
   deactivateExternalProject,
   reactivateExternalProject,
 }
+export { setBonusConfig, addBonus }
 export * from './core'

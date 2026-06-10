@@ -20,6 +20,7 @@ const TYPE_LABELS: Record<AdjustmentType, string> = {
   advance: 'Advance',
   deduction_other: 'Other Deduction',
   expense_reimbursement: 'Expense Reimbursement',
+  bonus: 'Bonus (Remote)',
 }
 
 const TYPE_ALLOCATION: Record<AdjustmentType, AllocationMethod> = {
@@ -28,6 +29,7 @@ const TYPE_ALLOCATION: Record<AdjustmentType, AllocationMethod> = {
   advance: 'employee_pay',
   deduction_other: 'employee_pay',
   expense_reimbursement: 'direct',
+  bonus: 'employee_pay',
 }
 
 export default function AdjustmentsPage() {

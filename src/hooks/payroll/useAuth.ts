@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { User } from '@supabase/supabase-js'
 
-export type UserRole = 'superadmin' | 'admin' | 'manager' | 'bookkeeper'
+export type UserRole = 'superadmin' | 'admin' | 'manager' | 'bookkeeper' | 'analyst' | 'worker'
 
 export interface AuthProfile {
   id: string
@@ -88,6 +88,8 @@ export function useAuth() {
   const isSuperAdmin = profile?.role === 'superadmin'
   const isAdmin = isSuperAdmin || profile?.role === 'admin'
   const isManager = isAdmin || profile?.role === 'manager'
+  // analyst is a lateral role (remote payroll + bonuses); admins also act as analyst.
+  const isAnalyst = isAdmin || profile?.role === 'analyst'
 
-  return { user, profile, loading, signOut, isSuperAdmin, isAdmin, isManager }
+  return { user, profile, loading, signOut, isSuperAdmin, isAdmin, isManager, isAnalyst }
 }

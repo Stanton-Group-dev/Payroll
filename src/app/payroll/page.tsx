@@ -4,7 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { Plus, Calendar, ChevronRight, AlertCircle, CheckCircle2, Clock } from 'lucide-react'
 import { usePayrollWeeks } from '@/hooks/payroll/usePayrollWeeks'
-import { PageHeader, FormButton, FormField, FormInput, StatusBadge } from '@/components/form'
+import { PageHeader, FormButton, FormField, FormInput, FormSelect, StatusBadge } from '@/components/form'
 import { format, addDays, startOfWeek } from 'date-fns'
 
 const statusOrder: Record<string, number> = {
@@ -27,6 +27,7 @@ export default function PayrollDashboard() {
   const { weeks, loading, createWeek } = usePayrollWeeks()
   const [showNew, setShowNew] = useState(false)
   const [weekStart, setWeekStart] = useState('')
+  const [payGroup, setPayGroup] = useState<'field' | 'remote'>('field')
   const [saving, setSaving] = useState(false)
 
   const handleCreate = async () => {
@@ -37,10 +38,12 @@ export default function PayrollDashboard() {
       const end = addDays(start, 6)
       await createWeek(
         format(start, 'yyyy-MM-dd'),
-        format(end, 'yyyy-MM-dd')
+        format(end, 'yyyy-MM-dd'),
+        payGroup
       )
       setShowNew(false)
       setWeekStart('')
+      setPayGroup('field')
     } finally {
       setSaving(false)
     }
@@ -78,6 +81,14 @@ export default function PayrollDashboard() {
                     onChange={e => setWeekStart(e.target.value)}
                     placeholder={suggestedStart}
                   />
+                </FormField>
+              </div>
+              <div className="max-w-[200px]">
+                <FormField label="Pay Group">
+                  <FormSelect value={payGroup} onChange={e => setPayGroup(e.target.value as 'field' | 'remote')}>
+                    <option value="field">Field (Workyard)</option>
+                    <option value="remote">Remote (Monitask)</option>
+                  </FormSelect>
                 </FormField>
               </div>
               {weekStart && (
@@ -125,6 +136,11 @@ export default function PayrollDashboard() {
                       <p className="font-medium text-[var(--ink)] text-sm">
                         Week of {format(new Date(week.week_start + 'T00:00:00'), 'MMM d, yyyy')}
                       </p>
+                      {week.pay_group === 'remote' && (
+                        <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 bg-[var(--accent)]/20 text-[var(--accent)]">
+                          Remote
+                        </span>
+                      )}
                       <span className="text-xs text-[var(--muted)]">
                         — {format(new Date(week.week_end + 'T00:00:00'), 'MMM d')}
                       </span>

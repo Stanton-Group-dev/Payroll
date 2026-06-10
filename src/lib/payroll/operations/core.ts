@@ -12,7 +12,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { ZodType } from 'zod'
-import { roleAtLeast, UnauthorizedError, type ConsoleRole } from './roles'
+import { roleAtLeast, roleAllowed, UnauthorizedError, type ConsoleRole } from './roles'
 
 // Re-export so callers can get the authz types/errors from the operation core.
 export { UnauthorizedError }
@@ -74,9 +74,15 @@ export interface Operation<TInput, TResult> {
    * Minimum console role required to preview or execute this operation.
    * Enforced centrally in previewOperation/executeOperation, so every caller
    * (the agent and the UI operation routes) is gated identically. Defaults to
-   * 'manager' when omitted.
+   * 'manager' when omitted. Ignored when `allowRoles` is set.
    */
   minRole?: ConsoleRole
+  /**
+   * Explicit allow-list of roles permitted to run this operation, for lateral
+   * roles that don't fit the linear rank (e.g. 'analyst' on remote/bonus ops).
+   * When set, it takes precedence over minRole. Admins/superadmins always pass.
+   */
+  allowRoles?: readonly string[]
   schema: ZodType<TInput>
   plan: (ctx: OperationContext, input: TInput) => Promise<Plan<TResult>>
 }
@@ -129,6 +135,12 @@ export class OperationValidationError extends OperationError {
  * execute, so authorization can never be forgotten by an individual route.
  */
 function assertOperationRole(ctx: OperationContext, op: Operation<unknown, unknown>): void {
+  if (op.allowRoles) {
+    if (!roleAllowed(ctx.actor.role, op.allowRoles)) {
+      throw new UnauthorizedError(`This action requires one of: ${op.allowRoles.join(', ')} (or admin).`)
+    }
+    return
+  }
   const min = op.minRole ?? 'manager'
   if (!roleAtLeast(ctx.actor.role, min)) {
     throw new UnauthorizedError(`This action requires ${min} access.`)

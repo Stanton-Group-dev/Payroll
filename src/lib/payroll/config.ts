@@ -26,3 +26,16 @@ export const OVERHEAD_PROPERTY_NAMES = [
 
 /** IANA timezone for the Workyard org. Used for date boundary calculations. */
 export const WORKYARD_ORG_TIMEZONE = 'America/New_York'
+
+/**
+ * Monitask (remote-worker activity tracking) OAuth endpoints. Monitask uses an
+ * IdentityServer OAuth2 flow (Basic-auth client_id:client_secret, refresh-token
+ * grant, ~1h access tokens, scope includes `ExternalApi`) — see monitask-api.ts.
+ * The actual activity/report data endpoint is gated behind Monitask's manual
+ * developer-portal grant and is isolated in a single adapter in monitask-api.ts.
+ */
+export const MONITASK_TOKEN_URL = 'https://app.monitask.com/identity/connect/token'
+/** Override the data API base once the real report endpoint is documented. */
+export const MONITASK_API_BASE = process.env.MONITASK_API_BASE ?? 'https://app.monitask.com/api'
+/** Org timezone reused for Monitask day-boundary math (same org). */
+export const MONITASK_ORG_TIMEZONE = WORKYARD_ORG_TIMEZONE
