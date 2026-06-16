@@ -1,5 +1,5 @@
 const FALLBACK_SUPABASE_URL = 'https://wkwmxxlfheywwbgdbzxe.supabase.co'
-const FALLBACK_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_9qP2hQ-5h0KubHf_zRuWbw_ueKuWt7O'
+const FALLBACK_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_WQOVDdHR6F6iLoTeEXliHw_sXMthMaw'
 
 function firstNonEmpty(...values: Array<string | undefined>) {
   return values.find(value => typeof value === 'string' && value.trim().length > 0)?.trim()
