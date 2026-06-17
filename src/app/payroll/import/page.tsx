@@ -231,6 +231,7 @@ export default function ImportPage() {
           regular_hours: row.regularHours,
           ot_hours: row.otHours,
           pto_hours: row.ptoHours,
+          miles: row.miles ?? 0,
           source: importMode === 'api' ? 'workyard_api' : 'workyard',
           workyard_timecardid: row.timecardId,
           is_flagged: row.status === 'flagged',
@@ -411,6 +412,7 @@ export default function ImportPage() {
                         <th className="px-3 py-2 text-right font-medium">Reg</th>
                         <th className="px-3 py-2 text-right font-medium">OT</th>
                         <th className="px-3 py-2 text-right font-medium">PTO</th>
+                        <th className="px-3 py-2 text-right font-medium">Miles</th>
                         <th className="px-3 py-2 text-left font-medium">Note</th>
                       </tr>
                     </thead>
@@ -439,6 +441,7 @@ export default function ImportPage() {
                           <td className="px-3 py-1.5 text-right">{row.regularHours || '—'}</td>
                           <td className="px-3 py-1.5 text-right">{row.otHours || '—'}</td>
                           <td className="px-3 py-1.5 text-right">{row.ptoHours || '—'}</td>
+                          <td className="px-3 py-1.5 text-right">{row.miles || '—'}</td>
                           <td className="px-3 py-1.5 text-[var(--muted)] max-w-48 truncate">{row.flag}</td>
                         </tr>
                       ))}

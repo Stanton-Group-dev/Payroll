@@ -13,6 +13,7 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
   const { weekId } = use(params)
   const {
     week, employees, entries, adjustments, feeConfigs, properties, employeeRates,
+    mileageReimbursements,
     approved, pendingCount, loading, approving, approvePayroll,
   } = usePayrollWeekReview(weekId)
 
@@ -23,8 +24,8 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
       ...emp,
       hourly_rate: resolveRateAsOf(emp.id, weekStart, employeeRates, emp.hourly_rate ?? 0),
     }))
-    return calculatePayroll(employeesWithHistoricalRates, entries, adjustments, feeConfigs, properties)
-  }, [employees, employeeRates, week, entries, adjustments, feeConfigs, properties])
+    return calculatePayroll(employeesWithHistoricalRates, entries, adjustments, feeConfigs, properties, mileageReimbursements)
+  }, [employees, employeeRates, week, entries, adjustments, feeConfigs, properties, mileageReimbursements])
 
   const timesheetApproved = week?.status !== 'draft'
   const canApprovePayroll = timesheetApproved && !approved && result !== null && pendingCount === 0
@@ -119,6 +120,7 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
                       <th className="px-3 py-2.5 text-right font-medium">Reg Wages</th>
                       <th className="px-3 py-2.5 text-right font-medium">OT Wages</th>
                       <th className="px-3 py-2.5 text-right font-medium">Phone</th>
+                      <th className="px-3 py-2.5 text-right font-medium">Mileage</th>
                       <th className="px-3 py-2.5 text-right font-medium">Advances</th>
                       <th className="px-3 py-2.5 text-right font-medium font-bold">Gross Pay</th>
                       <th className="px-3 py-2.5 text-right font-medium">Tax (8%)</th>
@@ -138,6 +140,7 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
                         <td className="px-3 py-2 text-right">{formatCurrency(emp.regular_wages)}</td>
                         <td className="px-3 py-2 text-right">{emp.ot_wages ? formatCurrency(emp.ot_wages) : '—'}</td>
                         <td className="px-3 py-2 text-right">{emp.phone_reimbursement ? formatCurrency(emp.phone_reimbursement) : '—'}</td>
+                        <td className="px-3 py-2 text-right">{emp.mileage_reimbursement ? formatCurrency(emp.mileage_reimbursement) : '—'}</td>
                         <td className="px-3 py-2 text-right text-[var(--error)]">{emp.advances ? `−${formatCurrency(emp.advances)}` : '—'}</td>
                         <td className="px-3 py-2 text-right font-semibold">{formatCurrency(emp.gross_pay)}</td>
                         <td className="px-3 py-2 text-right text-[var(--muted)]">{emp.payroll_tax ? formatCurrency(emp.payroll_tax) : '—'}</td>
@@ -149,7 +152,7 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
                   </tbody>
                   <tfoot>
                     <tr className="bg-[var(--primary)] text-white text-xs font-semibold">
-                      <td className="px-3 py-2.5" colSpan={7}>Totals</td>
+                      <td className="px-3 py-2.5" colSpan={8}>Totals</td>
                       <td className="px-3 py-2.5 text-right">{formatCurrency(result.total_gross_pay)}</td>
                       <td className="px-3 py-2.5 text-right">{formatCurrency(result.total_payroll_tax)}</td>
                       <td className="px-3 py-2.5 text-right">{formatCurrency(result.total_workers_comp)}</td>
@@ -174,6 +177,7 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
                       <th className="px-3 py-2.5 text-right font-medium">Units</th>
                       <th className="px-3 py-2.5 text-right font-medium">Labor</th>
                       <th className="px-3 py-2.5 text-right font-medium">Spread</th>
+                      <th className="px-3 py-2.5 text-right font-medium">Mileage</th>
                       <th className="px-3 py-2.5 text-right font-medium">Mgmt Fee (10%)</th>
                       <th className="px-3 py-2.5 text-right font-medium font-bold">Total Cost</th>
                       <th className="px-3 py-2.5 text-right font-medium">$/Unit</th>
@@ -192,6 +196,7 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
                         <td className="px-3 py-2 text-right">{pc.total_units}</td>
                         <td className="px-3 py-2 text-right">{formatCurrency(pc.labor_cost)}</td>
                         <td className="px-3 py-2 text-right">{pc.spread_cost ? formatCurrency(pc.spread_cost) : '—'}</td>
+                        <td className="px-3 py-2 text-right">{pc.mileage_cost ? formatCurrency(pc.mileage_cost) : '—'}</td>
                         <td className="px-3 py-2 text-right">{formatCurrency(pc.mgmt_fee)}</td>
                         <td className="px-3 py-2 text-right font-semibold">{formatCurrency(pc.total_cost)}</td>
                         <td className="px-3 py-2 text-right text-[var(--muted)]">{pc.cost_per_unit ? formatCurrency(pc.cost_per_unit) : '—'}</td>

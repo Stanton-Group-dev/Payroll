@@ -36,6 +36,7 @@ function TimesheetsPageContent() {
   const [selectedWeekId, setSelectedWeekId] = useState('')
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null)
   const [selectedCell, setSelectedCell] = useState<SelectedCell | null>(null)
+  const [drawerDirty, setDrawerDirty] = useState(false)
 
   useEffect(() => {
     const w = searchParams.get('week')
@@ -61,11 +62,13 @@ function TimesheetsPageContent() {
   useEffect(() => {
     setSelectedEmployeeId(null)
     setSelectedCell(null)
+    setDrawerDirty(false)
   }, [selectedWeekId])
 
   // Reset cell on employee change
   useEffect(() => {
     setSelectedCell(null)
+    setDrawerDirty(false)
   }, [selectedEmployeeId])
 
   // Auto-select first employee once entries load
@@ -98,19 +101,30 @@ function TimesheetsPageContent() {
   const totalPending = pendingEntries.length
   const affectedEmployees = new Set(unallocatedEntries.map(e => e.employee_id)).size
 
-  const handleCellClick = (cell: SelectedCell) => {
-    if (isLocked) return
-    if (
-      selectedCell?.rowPropertyId === cell.rowPropertyId &&
-      selectedCell?.dayIndex === cell.dayIndex
-    ) {
-      setSelectedCell(null)
-    } else {
-      setSelectedCell(cell)
-    }
+  const closeDrawer = () => {
+    setSelectedCell(null)
+    setDrawerDirty(false)
   }
 
-  const handleDone = () => setSelectedCell(null)
+  const handleCellClick = (cell: SelectedCell) => {
+    if (isLocked) return
+    const isSameCell =
+      selectedCell?.rowPropertyId === cell.rowPropertyId &&
+      selectedCell?.dayIndex === cell.dayIndex
+    // Clicking the open cell again closes it (explicit dismiss — no prompt).
+    if (isSameCell) {
+      closeDrawer()
+      return
+    }
+    // Switching to a different cell would discard in-progress edits — confirm first.
+    if (selectedCell && drawerDirty && !window.confirm('Discard unsaved changes?')) {
+      return
+    }
+    setSelectedCell(cell)
+    setDrawerDirty(false)
+  }
+
+  const handleDone = () => closeDrawer()
 
   return (
     <div className="flex flex-col h-screen">
@@ -246,18 +260,20 @@ function TimesheetsPageContent() {
                       renderDrawer={() =>
                         selectedCell ? (
                           <InlineDrawer
+                            key={`${selectedCell.rowPropertyId}-${selectedCell.dayIndex}`}
                             cell={selectedCell}
                             properties={properties}
                             portfolios={portfolios}
                             allProperties={allProperties}
                             isLocked={isLocked}
-                            onClose={() => setSelectedCell(null)}
+                            onClose={closeDrawer}
                             reassign={reassign}
                             spread={spread}
                             removeEntry={removeEntry}
                             setPending={setPending}
                             resolvePending={resolvePending}
                             onDone={handleDone}
+                            onDirtyChange={setDrawerDirty}
                           />
                         ) : null
                       }

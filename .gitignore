@@ -36,3 +36,6 @@ Thumbs.db
 # Editor
 .vscode/
 .idea/
+
+# graphify knowledge-graph build artifact (local-only; rebuild via /graphify)
+graphify-out/

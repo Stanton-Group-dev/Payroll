@@ -215,9 +215,25 @@ export function useTimesheetAdjustments(weekId: string | null) {
     sourceEntryId?: string
   }) => {
     if (params.propertyIds.length === 0) throw new Error('Select at least one property')
+    if (params.totalHours <= 0) throw new Error('Hours to spread must be greater than 0')
     const supabase = createClient()
     const userId = (await supabase.auth.getUser()).data.user?.id ?? null
-    const hoursEach = parseFloat((params.totalHours / params.propertyIds.length).toFixed(2))
+
+    // Distribute hours so the per-property legs sum *exactly* to totalHours.
+    // Each leg is rounded to the cent; the final leg absorbs any rounding remainder
+    // so we never silently drop (or invent) fractions of an hour.
+    const n = params.propertyIds.length
+    const hoursPer: number[] = []
+    let running = 0
+    for (let i = 0; i < n; i++) {
+      if (i === n - 1) {
+        hoursPer.push(parseFloat((params.totalHours - running).toFixed(2)))
+      } else {
+        const h = Math.round((params.totalHours / n) * 100) / 100
+        hoursPer.push(h)
+        running += h
+      }
+    }
 
     // Create spread event parent
     const { data: spreadEvent, error: seErr } = await supabase
@@ -236,12 +252,12 @@ export function useTimesheetAdjustments(weekId: string | null) {
     if (seErr) throw new Error(seErr.message)
 
     // Create one entry per property
-    const entries = params.propertyIds.map(pid => ({
+    const entries = params.propertyIds.map((pid, i) => ({
       payroll_week_id: weekId,
       employee_id: params.employeeId,
       property_id: pid,
       entry_date: params.date,
-      regular_hours: hoursEach,
+      regular_hours: hoursPer[i],
       ot_hours: 0,
       pto_hours: 0,
       source: 'manual_spread' as const,
@@ -253,13 +269,26 @@ export function useTimesheetAdjustments(weekId: string | null) {
     const { error: entErr } = await supabase.from('payroll_time_entries').insert(entries)
     if (entErr) throw new Error(entErr.message)
 
-    // If spreading from an existing unallocated entry, deactivate the source
+    // Reconcile the source unallocated entry. When the full block was spread we
+    // deactivate it; when only part was spread we keep it active holding the
+    // remainder so the leftover hours stay visible as unallocated.
     if (params.sourceEntryId) {
-      await supabase.from('payroll_time_entries').update({ is_active: false }).eq('id', params.sourceEntryId)
+      const src = allEntries.find(e => e.id === params.sourceEntryId)
+      const srcTotal = src ? (src.regular_hours ?? 0) + (src.ot_hours ?? 0) : 0
+      const remainder = parseFloat((srcTotal - params.totalHours).toFixed(2))
+      if (src && remainder > 0.01) {
+        await supabase.from('payroll_time_entries')
+          .update({ regular_hours: remainder, ot_hours: 0 })
+          .eq('id', params.sourceEntryId)
+      } else {
+        await supabase.from('payroll_time_entries')
+          .update({ is_active: false })
+          .eq('id', params.sourceEntryId)
+      }
     }
 
     await refetch()
-  }, [weekId, refetch])
+  }, [weekId, refetch, allEntries])
 
   const removeEntry = useCallback(async (entryId: string, reason: string) => {
     const supabase = createClient()

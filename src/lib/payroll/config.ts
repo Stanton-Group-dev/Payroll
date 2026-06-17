@@ -15,6 +15,13 @@ export const WORKERS_COMP_RATE = 0.03
 export const PHONE_REIMBURSEMENT_AMOUNT = 8
 
 /**
+ * Fallback mileage reimbursement rate (USD per mile) used only when no row exists in
+ * payroll_mileage_rates. The live, effective-dated rate is stored in that table and
+ * managed from Admin → Mileage Rate. Kept in sync with the migration seed (0.73).
+ */
+export const DEFAULT_MILEAGE_RATE = 0.73
+
+/**
  * Workyard project name fragments that indicate unallocated / overhead time.
  * Entries matching these names are flagged for redistribution on import.
  */

@@ -111,7 +111,8 @@ export function WeekGrid({ entries, weekStart, selectedCell, onCellClick, drawer
     selectedCell?.rowPropertyId === propId && selectedCell?.dayIndex === dayIdx
 
   const cellClass = (state: CellState, isSelected: boolean, propId: string | null) => {
-    const base = 'px-2 py-1.5 text-right text-sm border-r border-[var(--divider)] cursor-pointer transition-colors relative'
+    const cursor = state === 'empty' ? 'cursor-default' : 'cursor-pointer'
+    const base = `px-2 py-1.5 text-right text-sm border-r border-[var(--divider)] ${cursor} transition-colors relative`
     if (isSelected) return `${base} bg-[var(--primary)]/10`
     if (state === 'unallocated' || propId === null) return `${base} bg-amber-50 hover:bg-amber-100`
     if (state === 'pending') return `${base} bg-blue-50 hover:bg-blue-100`
@@ -177,7 +178,7 @@ export function WeekGrid({ entries, weekStart, selectedCell, onCellClick, drawer
                 {row.cells.map((cell, dayIdx) => (
                   <td
                     key={dayIdx}
-                    onClick={() => onCellClick({ rowPropertyId: row.propertyId, dayIndex: dayIdx, entries: cell.entries })}
+                    onClick={() => cell.entries.length > 0 && onCellClick({ rowPropertyId: row.propertyId, dayIndex: dayIdx, entries: cell.entries })}
                     className={cellClass(cell.state, isCellSelected(row.propertyId, dayIdx), row.propertyId)}
                   >
                     {cell.hours > 0

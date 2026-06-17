@@ -16,7 +16,7 @@ function emp(id: string, name: string, gross: number): EmployeePaySummary {
   return {
     employee_id: id, employee_name: name,
     regular_hours: 40, ot_hours: 0, pto_hours: 0,
-    regular_wages: gross, ot_wages: 0, phone_reimbursement: 0,
+    regular_wages: gross, ot_wages: 0, phone_reimbursement: 0, mileage_reimbursement: 0,
     other_adjustments: 0, advances: 0, gross_pay: gross,
     payroll_tax: 0, workers_comp: 0, management_fee: 0, total_billable: gross,
   }
@@ -24,7 +24,7 @@ function emp(id: string, name: string, gross: number): EmployeePaySummary {
 function prop(id: string, code: string, name: string, total: number): PropertyCostSummary {
   return {
     property_id: id, property_code: code, property_name: name, total_units: 10,
-    labor_cost: total, spread_cost: 0, mgmt_fee: 0, total_cost: total, cost_per_unit: total / 10,
+    labor_cost: total, spread_cost: 0, mileage_cost: 0, mgmt_fee: 0, total_cost: total, cost_per_unit: total / 10,
   }
 }
 function result(emps: EmployeePaySummary[], props: PropertyCostSummary[], gross: number): PayrollCalculationResult {

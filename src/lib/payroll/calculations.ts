@@ -4,9 +4,11 @@ import type {
   PayrollAdjustment,
   PayrollManagementFeeConfig,
   PayrollEmployeeRate,
+  PayrollMileageRate,
+  PayrollMileageReimbursement,
   Property,
 } from '@/lib/supabase/types'
-import { PAYROLL_TAX_RATE, WORKERS_COMP_RATE } from '@/lib/payroll/config'
+import { PAYROLL_TAX_RATE, WORKERS_COMP_RATE, DEFAULT_MILEAGE_RATE } from '@/lib/payroll/config'
 
 /**
  * Given an employee's rate history and a week start date, return the rate
@@ -25,6 +27,21 @@ export function resolveRateAsOf(
   return applicable.length > 0 ? Number(applicable[0].rate) : fallbackRate
 }
 
+/**
+ * Resolve the mileage reimbursement rate (USD per mile) effective as of a date —
+ * most recent payroll_mileage_rates row with effective_date ≤ asOf. Falls back to
+ * DEFAULT_MILEAGE_RATE when no row applies.
+ */
+export function resolveMileageRateAsOf(
+  rates: PayrollMileageRate[],
+  asOf: string
+): number {
+  const applicable = rates
+    .filter(r => r.effective_date <= asOf)
+    .sort((a, b) => b.effective_date.localeCompare(a.effective_date))
+  return applicable.length > 0 ? Number(applicable[0].rate_per_mile) : DEFAULT_MILEAGE_RATE
+}
+
 export interface EmployeePaySummary {
   employee_id: string
   employee_name: string
@@ -34,6 +51,7 @@ export interface EmployeePaySummary {
   regular_wages: number
   ot_wages: number
   phone_reimbursement: number
+  mileage_reimbursement: number
   other_adjustments: number
   advances: number
   gross_pay: number
@@ -50,6 +68,7 @@ export interface PropertyCostSummary {
   total_units: number
   labor_cost: number
   spread_cost: number
+  mileage_cost: number
   mgmt_fee: number
   total_cost: number
   cost_per_unit: number
@@ -101,12 +120,20 @@ export function calculatePayroll(
   entries: PayrollTimeEntry[],
   adjustments: PayrollAdjustment[],
   mgmtFeeConfigs: PayrollManagementFeeConfig[],
-  properties: Property[]
+  properties: Property[],
+  mileageReimbursements: PayrollMileageReimbursement[] = []
 ): PayrollCalculationResult {
   const employeeMap = Object.fromEntries(employees.map(e => [e.id, e]))
   const propertyMap = Object.fromEntries(properties.map(p => [p.id, p]))
 
   const totalPortfolioUnits = properties.reduce((sum, p) => sum + (p.total_units ?? 0), 0)
+
+  // Approved mileage reimbursement dollars per employee (pending/denied are ignored).
+  const approvedMileage: Record<string, number> = {}
+  for (const m of mileageReimbursements) {
+    if (m.status !== 'approved') continue
+    approvedMileage[m.employee_id] = (approvedMileage[m.employee_id] ?? 0) + Number(m.amount)
+  }
 
   // Per-employee aggregation
   const empData: Record<string, {
@@ -116,7 +143,11 @@ export function calculatePayroll(
     regular_wages: number
     ot_wages: number
     phone_reimbursement: number
+    mileage_reimbursement: number
     other_adjustments: number
+    /** Reimbursement dollars sitting inside other_adjustments (tool, expense_reimbursement) —
+     *  tracked so they can be removed from the payroll-tax / workers'-comp base. */
+    nontax_reimbursement: number
     advances: number
   }> = {}
 
@@ -124,7 +155,7 @@ export function calculatePayroll(
     empData[emp.id] = {
       regular_hours: 0, ot_hours: 0, pto_hours: 0,
       regular_wages: 0, ot_wages: 0,
-      phone_reimbursement: 0, other_adjustments: 0, advances: 0,
+      phone_reimbursement: 0, mileage_reimbursement: 0, other_adjustments: 0, nontax_reimbursement: 0, advances: 0,
     }
   }
 
@@ -147,7 +178,7 @@ export function calculatePayroll(
       if (!empData[emp.id]) empData[emp.id] = {
         regular_hours: 0, ot_hours: 0, pto_hours: 0,
         regular_wages: 0, ot_wages: 0,
-        phone_reimbursement: 0, other_adjustments: 0, advances: 0,
+        phone_reimbursement: 0, mileage_reimbursement: 0, other_adjustments: 0, nontax_reimbursement: 0, advances: 0,
       }
       empData[emp.id].regular_wages = emp.weekly_rate
     }
@@ -162,7 +193,17 @@ export function calculatePayroll(
       empData[adj.employee_id].advances += Math.abs(adj.amount)
     } else {
       empData[adj.employee_id].other_adjustments += adj.amount
+      // tool and expense reimbursements are reimbursements, not wages — track them so
+      // they're removed from the tax/WC base below. (bonus stays taxable.)
+      if (adj.type === 'tool' || adj.type === 'expense_reimbursement') {
+        empData[adj.employee_id].nontax_reimbursement += adj.amount
+      }
     }
+  }
+
+  // Apply approved mileage reimbursement to each employee.
+  for (const [empId, amt] of Object.entries(approvedMileage)) {
+    if (empData[empId]) empData[empId].mileage_reimbursement += amt
   }
 
   // Build employee summaries
@@ -170,11 +211,19 @@ export function calculatePayroll(
   for (const emp of employees) {
     const d = empData[emp.id]
     if (!d) continue
-    const gross_pay = d.regular_wages + d.ot_wages + d.phone_reimbursement + d.other_adjustments - d.advances
-    const payroll_tax = emp.pay_tax ? gross_pay * PAYROLL_TAX_RATE : 0
-    const workers_comp = emp.wc ? gross_pay * WORKERS_COMP_RATE : 0
+    const gross_pay = d.regular_wages + d.ot_wages + d.phone_reimbursement + d.mileage_reimbursement + d.other_adjustments - d.advances
+    // Reimbursements are not wages — no employer payroll tax or workers' comp is charged
+    // on them (phone, mileage, tool, expense_reimbursement). They're still paid to the
+    // employee (in gross, and thus in the pre-fund total); they're just removed from the
+    // tax/WC base. Bonuses remain taxable wages.
+    const taxable_base = gross_pay - d.phone_reimbursement - d.mileage_reimbursement - d.nontax_reimbursement
+    const payroll_tax = emp.pay_tax ? taxable_base * PAYROLL_TAX_RATE : 0
+    const workers_comp = emp.wc ? taxable_base * WORKERS_COMP_RATE : 0
     const feeRate = getMgmtFeeRate(null, mgmtFeeConfigs)
-    const management_fee = gross_pay * feeRate
+    // Mileage is a direct pass-through cost billed to the property at cost — the
+    // management fee (general overhead) does NOT apply to it, so it's excluded from
+    // the fee base. (Phone/tools remain in the base; they're general spread, not direct.)
+    const management_fee = (gross_pay - d.mileage_reimbursement) * feeRate
     employee_summaries.push({
       employee_id: emp.id,
       employee_name: emp.name,
@@ -184,6 +233,7 @@ export function calculatePayroll(
       regular_wages: round2(d.regular_wages),
       ot_wages: round2(d.ot_wages),
       phone_reimbursement: round2(d.phone_reimbursement),
+      mileage_reimbursement: round2(d.mileage_reimbursement),
       other_adjustments: round2(d.other_adjustments),
       advances: round2(d.advances),
       gross_pay: round2(gross_pay),
@@ -217,14 +267,43 @@ export function calculatePayroll(
     propSpreadCost[prop.id] = (prop.total_units ?? 0) / totalPortfolioUnits * spreadTotal
   }
 
+  // Method C: Direct mileage by property. Each employee's approved reimbursement is
+  // allocated across the properties where they logged miles, proportional to the raw
+  // miles on their time entries. Because the amount is already based on approved
+  // (possibly trimmed) miles, the per-property fractions scale the billing down too —
+  // properties are billed only for what was approved. Miles on entries without a
+  // property (or with no logged miles) leave that portion paid-but-unbilled.
+  const empMilesByProp: Record<string, Record<string, number>> = {}
+  const empTotalMiles: Record<string, number> = {}
+  for (const entry of entries) {
+    const miles = entry.miles ?? 0
+    if (miles <= 0) continue
+    empTotalMiles[entry.employee_id] = (empTotalMiles[entry.employee_id] ?? 0) + miles
+    if (entry.property_id) {
+      ;(empMilesByProp[entry.employee_id] ??= {})[entry.property_id] =
+        (empMilesByProp[entry.employee_id][entry.property_id] ?? 0) + miles
+    }
+  }
+
+  const propMileageCost: Record<string, number> = {}
+  for (const [empId, amt] of Object.entries(approvedMileage)) {
+    const totalMiles = empTotalMiles[empId] ?? 0
+    if (totalMiles <= 0) continue // paid but unbilled — no per-property miles to allocate against
+    for (const [propId, miles] of Object.entries(empMilesByProp[empId] ?? {})) {
+      propMileageCost[propId] = (propMileageCost[propId] ?? 0) + amt * (miles / totalMiles)
+    }
+  }
+
   // Build property cost summaries
   const property_costs: PropertyCostSummary[] = []
   for (const prop of properties) {
     const labor = propLaborCost[prop.id] ?? 0
     const spread = propSpreadCost[prop.id] ?? 0
+    const mileage = propMileageCost[prop.id] ?? 0
     const feeRate = getMgmtFeeRate(prop.portfolio_id, mgmtFeeConfigs)
+    // Mileage is pass-through: billed to the property at cost, NOT in the fee base.
     const mgmt_fee = (labor + spread) * feeRate
-    const total_cost = labor + spread + mgmt_fee
+    const total_cost = labor + spread + mileage + mgmt_fee
     property_costs.push({
       property_id: prop.id,
       property_code: prop.code,
@@ -232,6 +311,7 @@ export function calculatePayroll(
       total_units: prop.total_units ?? 0,
       labor_cost: round2(labor),
       spread_cost: round2(spread),
+      mileage_cost: round2(mileage),
       mgmt_fee: round2(mgmt_fee),
       total_cost: round2(total_cost),
       cost_per_unit: prop.total_units ? round2(total_cost / prop.total_units) : 0,

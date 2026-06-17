@@ -72,6 +72,10 @@ const columns: Column<PayrollEmployee & Record<string, unknown>>[] = [
     key: 'ot_allowed', label: 'OT', width: 60,
     render: (v) => <span className={v ? 'text-[var(--success)]' : 'text-[var(--muted)]'}>{v ? '✓' : '—'}</span>
   },
+  {
+    key: 'mileage_eligible', label: 'Mileage', width: 70,
+    render: (v) => <span className={v ? 'text-[var(--success)]' : 'text-[var(--muted)]'}>{v ? '✓' : '—'}</span>
+  },
   { key: 'workyard_id', label: 'Workyard ID', width: 130, render: (v) => <span className="font-mono text-xs">{String(v ?? '—')}</span> },
 ]
 
@@ -79,7 +83,7 @@ const emptyEmployee: Partial<PayrollEmployee> = {
   name: '', workyard_id: '', monitask_id: '', type: 'hourly', pay_group: 'field',
   hourly_rate: undefined, weekly_rate: undefined,
   trade: '', is_active: true,
-  ot_allowed: false, pay_tax: false, wc: false,
+  ot_allowed: false, pay_tax: false, wc: false, mileage_eligible: false,
 }
 
 interface DeptSplitRow { department: string; pct: string }
@@ -532,6 +536,7 @@ export default function EmployeesPage() {
             ['ot_allowed', 'OT Allowed'],
             ['pay_tax', 'Payroll Tax (8%)'],
             ['wc', "Workers' Comp (3%)"],
+            ['mileage_eligible', 'Mileage Eligible'],
           ] as [keyof PayrollEmployee, string][]).map(([field, label]) => (
             <label key={field} className="flex items-center gap-2 text-sm text-[var(--ink)] cursor-pointer">
               <input

@@ -9,6 +9,7 @@ import type {
   PayrollAdjustment,
   PayrollManagementFeeConfig,
   PayrollEmployeeRate,
+  PayrollMileageReimbursement,
   Property,
 } from '@/lib/supabase/types'
 import type { PayrollCalculationResult } from '@/lib/payroll/calculations'
@@ -21,6 +22,7 @@ export function usePayrollWeekReview(weekId: string) {
   const [feeConfigs, setFeeConfigs] = useState<PayrollManagementFeeConfig[]>([])
   const [properties, setProperties] = useState<Property[]>([])
   const [employeeRates, setEmployeeRates] = useState<PayrollEmployeeRate[]>([])
+  const [mileageReimbursements, setMileageReimbursements] = useState<PayrollMileageReimbursement[]>([])
   const [approved, setApproved] = useState(false)
   const [pendingCount, setPendingCount] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -31,7 +33,7 @@ export function usePayrollWeekReview(weekId: string) {
     setLoading(true)
     setError(null)
     const supabase = createClient()
-    const [weekRes, empRes, entRes, adjRes, feeRes, propRes, approvalRes, ratesRes] = await Promise.all([
+    const [weekRes, empRes, entRes, adjRes, feeRes, propRes, approvalRes, ratesRes, mileageRes] = await Promise.all([
       supabase.from('payroll_weeks').select('*').eq('id', weekId).single(),
       supabase.from('payroll_employees').select('*').eq('is_active', true),
       supabase.from('payroll_time_entries').select('*').eq('payroll_week_id', weekId).eq('is_flagged', false).eq('is_active', true),
@@ -40,6 +42,7 @@ export function usePayrollWeekReview(weekId: string) {
       supabase.from('properties').select('id, appfolio_property_id, code, name, total_units, portfolio_id, address, billing_llc, is_active').eq('is_active', true),
       supabase.from('payroll_approvals').select('*').eq('payroll_week_id', weekId).eq('stage', 'payroll'),
       supabase.from('payroll_employee_rates').select('*'),
+      supabase.from('payroll_mileage_reimbursements').select('*').eq('payroll_week_id', weekId),
     ])
     if (weekRes.error) { setError(weekRes.error.message); setLoading(false); return }
     setWeek(weekRes.data)
@@ -49,6 +52,7 @@ export function usePayrollWeekReview(weekId: string) {
     setFeeConfigs(feeRes.data ?? [])
     setProperties(propRes.data ?? [])
     setEmployeeRates(ratesRes.data ?? [])
+    setMileageReimbursements(mileageRes.data ?? [])
     setApproved((approvalRes.data?.length ?? 0) > 0)
     // Count pending entries that block approval
     const pendingRes = await supabase
@@ -96,6 +100,7 @@ export function usePayrollWeekReview(weekId: string) {
 
   return {
     week, employees, entries, adjustments, feeConfigs, properties, employeeRates,
+    mileageReimbursements,
     approved, pendingCount, loading, error, approving,
     approvePayroll, refetch: load,
   }

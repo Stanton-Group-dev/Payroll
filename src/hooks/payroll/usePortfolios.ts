@@ -2,12 +2,15 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { isDeleteMarked, isWestendProperty } from '@/lib/payroll/properties'
 
 export interface PortfolioProperty {
   id: string
   code: string
   name: string
   portfolio_id: string | null
+  billing_llc?: string | null
+  isWestend?: boolean
 }
 
 export interface PortfolioWithProperties {
@@ -29,13 +32,15 @@ export function usePortfolios() {
 
     const [portResult, propResult] = await Promise.all([
       supabase.from('portfolios').select('id, name').eq('is_active', true).order('name'),
-      supabase.from('properties').select('id, code, name, portfolio_id').eq('is_active', true).order('code'),
+      supabase.from('properties').select('id, code, name, portfolio_id, billing_llc').eq('is_active', true).order('code'),
     ])
 
     if (portResult.error) { setError(portResult.error.message); setLoading(false); return }
     if (propResult.error) { setError(propResult.error.message); setLoading(false); return }
 
-    const props = (propResult.data ?? []) as PortfolioProperty[]
+    const props: PortfolioProperty[] = (propResult.data ?? [])
+      .filter(p => !isDeleteMarked(p))
+      .map(p => ({ ...p, isWestend: isWestendProperty(p) }))
     setAllProperties(props)
 
     const propsByPortfolio = new Map<string, PortfolioProperty[]>()

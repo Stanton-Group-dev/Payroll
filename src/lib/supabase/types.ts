@@ -22,6 +22,7 @@ export type CostType = 'labor' | 'spread' | 'mgmt_fee'
 export type ApprovalStage = 'timesheet' | 'payroll' | 'invoice' | 'statement'
 export type CorrectionOperation = 'reassign' | 'split' | 'add' | 'remove'
 export type TravelPremiumType = 'per_day' | 'flat_per_job'
+export type MileageStatus = 'pending' | 'approved' | 'denied'
 export type ExpenseType = 'gas' | 'tolls' | 'parking' | 'materials' | 'tools' | 'food' | 'other' | 'mileage'
 export type ExpensePaymentMethod = 'personal' | 'company_card' | 'company_account' | 'unknown'
 export type ExpenseSubmissionStatus = 'pending' | 'approved' | 'rejected' | 'correction_requested' | 'bookkeeping_only'
@@ -66,6 +67,8 @@ export interface PayrollEmployee {
   ot_allowed: boolean
   pay_tax: boolean
   wc: boolean
+  /** Roster flag: this employee generally receives mileage reimbursement. */
+  mileage_eligible: boolean
   // --- Master roster / comp-sheet fields (the single source of truth, was Excel) ---
   /** Org department, e.g. "01 - Corporate". */
   department: string | null
@@ -176,6 +179,8 @@ export interface PayrollTimeEntry {
   regular_hours: number
   ot_hours: number
   pto_hours: number
+  /** Raw miles for this row, captured from the Workyard payroll export. Carries the row's property. */
+  miles: number
   source: TimeEntrySource
   workyard_timecardid: string | null
   is_flagged: boolean
@@ -240,6 +245,37 @@ export interface PayrollManagementFeeConfig {
   effective_date: string
   created_at: string
   created_by: string | null
+}
+
+/** Effective-dated mileage reimbursement rate (USD per mile). Append-only history,
+ *  most-recent effective row wins — mirrors PayrollManagementFeeConfig. */
+export interface PayrollMileageRate {
+  id: string
+  rate_per_mile: number
+  effective_date: string
+  created_at: string
+  created_by: string | null
+}
+
+/** Per-(week, employee) mileage reimbursement review. miles_approved is editable so a
+ *  manager can trim miles; amount = miles_approved * rate_per_mile. Only status='approved'
+ *  rows are paid and billed to properties. */
+export interface PayrollMileageReimbursement {
+  id: string
+  payroll_week_id: string
+  employee_id: string
+  miles_raw: number
+  miles_approved: number
+  rate_per_mile: number
+  amount: number
+  status: MileageStatus
+  notes: string | null
+  reviewed_by: string | null
+  reviewed_at: string | null
+  created_at: string
+  updated_at: string
+  created_by: string | null
+  employee?: PayrollEmployee
 }
 
 export interface PayrollInvoice {

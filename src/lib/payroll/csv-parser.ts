@@ -9,6 +9,8 @@ export interface WorkyardRow {
   regularHours: number
   otHours: number
   ptoHours: number
+  /** Miles driven, from the Workyard payroll export. Optional — the API path does not expose it. */
+  miles?: number
   timecardId: string
   costCode: string
 }
@@ -54,6 +56,7 @@ export function parseWorkyardCSV(csvText: string): ParseResult {
     const regularHours = parseFloat(get(cells, 'regular_hours') || get(cells, 'reg_hours') || '0') || 0
     const otHours = parseFloat(get(cells, 'ot_hours') || get(cells, 'overtime_hours') || '0') || 0
     const ptoHours = parseFloat(get(cells, 'pto_hours') || get(cells, 'pto') || '0') || 0
+    const miles = parseFloat(get(cells, 'miles') || get(cells, 'mileage') || get(cells, 'total_miles') || '0') || 0
 
     if (!workyardId && !employeeName) {
       errors.push(`Row ${i + 1}: missing employee identifier`)
@@ -69,6 +72,7 @@ export function parseWorkyardCSV(csvText: string): ParseResult {
       regularHours,
       otHours,
       ptoHours,
+      miles,
       timecardId,
       costCode,
     })

@@ -35,6 +35,7 @@ const navItems = [
   { href: '/payroll/import', label: 'Workyard Import', icon: Upload },
   { href: '/payroll/timesheets', label: 'Timesheet Adjustments', icon: ClipboardEdit },
   { href: '/payroll/expenses', label: 'Expenses', icon: Receipt },
+  { href: '/payroll/mileage', label: 'Mileage', icon: Car },
   { href: '/payroll/adjustments', label: 'Adjustments', icon: DollarSign },
   { href: '/payroll/splits', label: 'Dept Splits', icon: SplitSquareVertical },
   { href: '/payroll/history', label: 'History', icon: History },
@@ -51,6 +52,7 @@ const adminItems = [
   { href: '/payroll/admin/users', label: 'Users & Roles', icon: Users },
   { href: '/payroll/admin/thresholds', label: 'Budget Thresholds', icon: Target },
   { href: '/payroll/admin/travel-premiums', label: 'Travel Premiums', icon: Car },
+  { href: '/payroll/admin/mileage-rate', label: 'Mileage Rate', icon: CircleDollarSign },
 ]
 
 export default function PayrollLayout({ children }: { children: React.ReactNode }) {

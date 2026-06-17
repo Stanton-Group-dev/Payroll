@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import { format, parseISO } from 'date-fns'
 import type { PayrollTimeEntry, PayrollEmployee, Property } from '@/lib/supabase/types'
 import type { PropertyOption } from '@/hooks/payroll/useProperties'
@@ -111,6 +111,32 @@ export function MultiPortfolioSpreadPicker({
 }: MultiPortfolioSpreadPickerProps) {
   const [mode, setMode] = useState<SpreadMode>('portfolio')
   const [expandedPortfolios, setExpandedPortfolios] = useState<Set<string>>(new Set())
+  const [includeWestend, setIncludeWestend] = useState(false)
+
+  // Westend properties (billed to SREP Westend LLC) are opt-in: excluded from the
+  // pickers unless the user explicitly toggles them on.
+  const westendIds = useMemo(
+    () => new Set(allProperties.filter(p => p.isWestend).map(p => p.id)),
+    [allProperties]
+  )
+  const hasWestend = westendIds.size > 0
+
+  const visibleAllProperties = includeWestend
+    ? allProperties
+    : allProperties.filter(p => !westendIds.has(p.id))
+
+  const visiblePortfolios = useMemo(() => {
+    if (includeWestend) return portfolios
+    return portfolios
+      .map(pf => ({ ...pf, properties: pf.properties.filter(p => !westendIds.has(p.id)) }))
+      .filter(pf => pf.properties.length > 0)
+  }, [portfolios, includeWestend, westendIds])
+
+  const toggleIncludeWestend = (next: boolean) => {
+    setIncludeWestend(next)
+    // Drop any Westend selections when opting back out so they aren't silently spread.
+    if (!next) onPropertyIdsChange(selectedPropertyIds.filter(id => !westendIds.has(id)))
+  }
 
   const perProp = selectedPropertyIds.length > 0
     ? (totalHours / selectedPropertyIds.length).toFixed(2) : '—'
@@ -141,9 +167,9 @@ export function MultiPortfolioSpreadPicker({
 
   const selectAll = () => {
     if (mode === 'portfolio') {
-      onPropertyIdsChange(Array.from(new Set(portfolios.flatMap(p => p.properties.map(pr => pr.id)))))
+      onPropertyIdsChange(Array.from(new Set(visiblePortfolios.flatMap(p => p.properties.map(pr => pr.id)))))
     } else {
-      onPropertyIdsChange(allProperties.map(p => p.id))
+      onPropertyIdsChange(visibleAllProperties.map(p => p.id))
     }
   }
 
@@ -168,12 +194,21 @@ export function MultiPortfolioSpreadPicker({
         <button type="button" onClick={() => onPropertyIdsChange([])} className="text-xs text-[var(--muted)] hover:underline">None</button>
       </div>
 
+      {hasWestend && (
+        <label className="flex items-center gap-2 text-xs text-[var(--muted)] cursor-pointer">
+          <input type="checkbox" checked={includeWestend}
+            onChange={e => toggleIncludeWestend(e.target.checked)}
+            className="accent-[var(--primary)] shrink-0" />
+          <span>Include Westend properties <span className="text-[var(--muted)]">(SREP Westend LLC — excluded by default)</span></span>
+        </label>
+      )}
+
       {mode === 'portfolio' && (
         <div className="max-h-52 overflow-y-auto border border-[var(--border)] divide-y divide-[var(--divider)]">
-          {portfolios.length === 0 && (
+          {visiblePortfolios.length === 0 && (
             <p className="px-3 py-3 text-xs text-[var(--muted)]">No portfolios available.</p>
           )}
-          {portfolios.map(portfolio => {
+          {visiblePortfolios.map(portfolio => {
             const pIds = portfolio.properties.map(p => p.id)
             const selectedCount = pIds.filter(id => selectedPropertyIds.includes(id)).length
             const allChecked = pIds.length > 0 && selectedCount === pIds.length
@@ -217,7 +252,7 @@ export function MultiPortfolioSpreadPicker({
 
       {mode === 'all' && (
         <div className="max-h-52 overflow-y-auto border border-[var(--border)] divide-y divide-[var(--divider)]">
-          {allProperties.map(p => {
+          {visibleAllProperties.map(p => {
             const checked = selectedPropertyIds.includes(p.id)
             return (
               <label key={p.id}
@@ -254,11 +289,12 @@ interface InlineDrawerProps {
   setPending: (entryId: string, note: string) => Promise<void>
   resolvePending: (entryId: string) => Promise<void>
   onDone: () => void
+  onDirtyChange: (dirty: boolean) => void
 }
 
 export function InlineDrawer({
   cell, properties, portfolios, allProperties, isLocked,
-  onClose, reassign, spread, removeEntry, setPending, resolvePending, onDone,
+  onClose, reassign, spread, removeEntry, setPending, resolvePending, onDone, onDirtyChange,
 }: InlineDrawerProps) {
   const isUnallocated = cell.rowPropertyId === null
   const primaryEntry = cell.entries[0]
@@ -285,15 +321,47 @@ export function InlineDrawer({
   const [splitRows, setSplitRows] = useState([{ propertyId: '', hours: '' }, { propertyId: '', hours: '' }])
   const [splitReason, setSplitReason] = useState('')
 
-  // Spread form
+  // Spread form — amount defaults to the full unallocated block (all hours)
   const [spreadPropertyIds, setSpreadPropertyIds] = useState<string[]>([])
   const [spreadReason, setSpreadReason] = useState('')
+  const [spreadAmount, setSpreadAmount] = useState<string>(
+    primaryEntry ? String(primaryEntry.regular_hours + primaryEntry.ot_hours) : ''
+  )
+
+  // Reset the spread amount to the full block whenever a different cell is opened.
+  useEffect(() => {
+    if (primaryEntry) setSpreadAmount(String(primaryEntry.regular_hours + primaryEntry.ot_hours))
+  }, [primaryEntry?.id])
 
   // Pending form
   const [pendingNote, setPendingNote] = useState(primaryEntry?.pending_note ?? '')
 
   // Remove form
   const [removeReason, setRemoveReason] = useState('')
+
+  // Whether the user has any in-progress input that would be lost on close.
+  // Reported up so the page can prompt before switching to another cell.
+  const pendingNoteBaseline = primaryEntry?.pending_note ?? ''
+  const spreadAmountBaseline = primaryEntry
+    ? String(primaryEntry.regular_hours + primaryEntry.ot_hours)
+    : ''
+  const isDirty =
+    assignProp !== '' ||
+    assignReason !== '' ||
+    editProp !== '' ||
+    editReason !== '' ||
+    splitReason.trim() !== '' ||
+    splitRows.length !== 2 ||
+    splitRows.some(r => r.propertyId !== '' || r.hours !== '') ||
+    spreadPropertyIds.length > 0 ||
+    spreadReason.trim() !== '' ||
+    spreadAmount !== spreadAmountBaseline ||
+    pendingNote !== pendingNoteBaseline ||
+    removeReason.trim() !== ''
+
+  useEffect(() => {
+    onDirtyChange(isDirty)
+  }, [isDirty, onDirtyChange])
 
   // Safe to bail now that every hook has been called unconditionally.
   if (!primaryEntry) return null
@@ -302,6 +370,8 @@ export function InlineDrawer({
   const entryDate = format(parseISO(primaryEntry.entry_date), 'EEE, MMM d')
   const splitTotal = splitRows.reduce((s, r) => s + (parseFloat(r.hours) || 0), 0)
   const splitRemaining = parseFloat((entryHours - splitTotal).toFixed(2))
+  const spreadHours = parseFloat(spreadAmount) || 0
+  const spreadRemaining = parseFloat((entryHours - spreadHours).toFixed(2))
 
   const tabs: { id: DrawerTab; label: string }[] = isUnallocated
     ? [
@@ -340,11 +410,13 @@ export function InlineDrawer({
         onDone()
       } else if (activeTab === 'spread') {
         if (spreadPropertyIds.length === 0) throw new Error('Select at least one property')
+        if (spreadHours <= 0) throw new Error('Enter hours to spread (> 0)')
+        if (spreadHours > entryHours + 0.01) throw new Error(`Cannot spread more than ${entryHours}h available`)
         if (!spreadReason.trim()) throw new Error('Reason required')
         await spread({
           employeeId: primaryEntry.employee_id,
           date: primaryEntry.entry_date,
-          totalHours: entryHours,
+          totalHours: spreadHours,
           propertyIds: spreadPropertyIds,
           portfolioId: getSpreadPortfolioId(),
           reason: spreadReason,
@@ -482,19 +554,34 @@ export function InlineDrawer({
         {/* ── Spread ── */}
         {activeTab === 'spread' && (
           <div className="space-y-2">
-            <p className="text-xs text-[var(--muted)]">Spread {entryHours}h evenly across selected properties</p>
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-2 text-xs text-[var(--muted)] shrink-0">
+                <span>Spread</span>
+                <div className="w-20">
+                  <FormInput type="number" step="0.25" min="0" max={entryHours}
+                    value={spreadAmount} onChange={e => setSpreadAmount(e.target.value)} />
+                </div>
+                <span>of {entryHours}h evenly across selected properties</span>
+              </label>
+              {Math.abs(spreadRemaining) > 0.01 && spreadHours > 0 && spreadHours <= entryHours && (
+                <span className="text-xs text-[var(--warning)]">{spreadRemaining}h will stay unallocated</span>
+              )}
+              {spreadHours > entryHours + 0.01 && (
+                <span className="text-xs text-[var(--error)]">exceeds {entryHours}h available</span>
+              )}
+            </div>
             <MultiPortfolioSpreadPicker
               portfolios={portfolios}
               allProperties={allProperties}
               selectedPropertyIds={spreadPropertyIds}
               onPropertyIdsChange={setSpreadPropertyIds}
-              totalHours={entryHours}
+              totalHours={spreadHours}
             />
             <FormTextarea value={spreadReason} onChange={e => setSpreadReason(e.target.value)}
               placeholder="Reason (required)" rows={2} />
             <div className="flex gap-2">
               <FormButton size="sm" onClick={save} loading={saving}
-                disabled={spreadPropertyIds.length === 0}>
+                disabled={spreadPropertyIds.length === 0 || spreadHours <= 0 || spreadHours > entryHours + 0.01}>
                 Create {spreadPropertyIds.length > 0 ? spreadPropertyIds.length : '—'} entries
               </FormButton>
               <FormButton size="sm" variant="ghost" onClick={onClose}>Cancel</FormButton>

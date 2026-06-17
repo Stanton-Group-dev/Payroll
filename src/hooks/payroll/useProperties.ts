@@ -2,11 +2,14 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { isDeleteMarked, isWestendProperty } from '@/lib/payroll/properties'
 
 export interface PropertyOption {
   id: string
   code: string
   name: string
+  billing_llc?: string | null
+  isWestend?: boolean
 }
 
 export function useProperties(activeOnly = true) {
@@ -18,11 +21,14 @@ export function useProperties(activeOnly = true) {
     setLoading(true)
     setError(null)
     const supabase = createClient()
-    let query = supabase.from('properties').select('id, code, name').order('code')
+    let query = supabase.from('properties').select('id, code, name, billing_llc').order('code')
     if (activeOnly) query = query.eq('is_active', true)
     const { data, error: err } = await query
     if (err) setError(err.message)
-    setProperties(data ?? [])
+    const options: PropertyOption[] = (data ?? [])
+      .filter(p => !isDeleteMarked(p))
+      .map(p => ({ ...p, isWestend: isWestendProperty(p) }))
+    setProperties(options)
     setLoading(false)
   }, [activeOnly])
 
