@@ -56,9 +56,11 @@ WORKYARD_MOCK=1                                                 # dummy import d
 
 ## Test credentials & data
 
-- **Test login:** `claude-test@payroll.test` (password shared out-of-band, not in repo).
-  Created directly in the live DB. Its profile currently has `role = null`, which the app
-  treats as **manager** (see `useAuth.ts`). It is **not** yet a true `admin` — see Pending.
+- **Test login:** `claude-test@payroll.test` — now a true **`superadmin`** (`is_active = true`),
+  so it unlocks the CommandBar and all admin surfaces. **Password is vaulted in Infisical
+  `/test-users` → `MAIN_TEST_PASSWORD`** (never in-repo). Throwaway test identity, lives in the
+  live DB. Canonical registry of test users across all Stanton auth realms (incl. how to
+  retrieve/rotate): `stanton-control/context/test-users.md`.
 - **Database:** Supabase project `wkwmxxlfheywwbgdbzxe` ("Stanton Main DB"), healthy,
   RLS enabled with real policies. Seeded: 9 portfolios, 72 properties, 11 hourly
   employees, 48 cost codes, 1 draft payroll week (week_start 2026-03-08).
@@ -97,10 +99,9 @@ Local-only (gitignored, not committed): `.env.local`.
 
 ## Pending / next steps
 
-1. **Promote the test user to admin (optional).** A one-line UPDATE on the production
-   `profiles` row (`role='admin', is_active=true` for `claude-test@payroll.test`). It was
-   intentionally not auto-applied (production-profile privilege grant). Until then the
-   account behaves as a manager, which is enough for most testing.
+1. ~~**Promote the test user to admin.**~~ **DONE (2026-06-16):** `claude-test@payroll.test`
+   is now `role='superadmin', is_active=true` on the Main DB `profiles` row. See
+   `stanton-control/context/test-users.md`.
 2. **Fix the key in the deployed env.** Set `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` to the
    active key in Vercel (may already be set). **Recommended:** remove the hardcoded fallback
    in `src/lib/supabase/config.ts` so a revoked key can never silently break login again.
