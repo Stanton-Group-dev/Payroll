@@ -62,12 +62,46 @@ export interface PayrollEmployee {
   weekly_rate: number | null
   trade: string | null
   is_active: boolean
+  is_management: boolean
   ot_allowed: boolean
   pay_tax: boolean
   wc: boolean
+  // --- Master roster / comp-sheet fields (the single source of truth, was Excel) ---
+  /** Org department, e.g. "01 - Corporate". */
+  department: string | null
+  /** Job title / role from the roster (distinct from `trade`). */
+  role: string | null
+  phone: string | null
+  email: string | null
+  /** Department-sequence code, e.g. "01-003". Not unique (techs share "02-002"). */
+  employee_code: string | null
+  /** Flat pay amount (roster "Amount" column, distinct from hourly_rate "Rate"). */
+  amount: number | null
+  phone_reimbursement: number | null
+  monthly_bonus: number | null
+  bonus: number | null
+  rent_adjustment: number | null
+  /** Roster "Type" verbatim: "1099 reimbursement" / "W-2" / "Remote". */
+  pay_classification: string | null
+  hired_on: string | null
+  /** Roster "Updated On" — manual comp-change date. */
+  comp_updated_on: string | null
   created_at: string
   updated_at: string
   created_by: string | null
+}
+
+/** One row per changed field, written by the payroll_employees audit trigger. */
+export interface PayrollEmployeeAudit {
+  id: string
+  employee_id: string
+  field: string
+  old_value: string | null
+  new_value: string | null
+  operation: 'insert' | 'update'
+  changed_by: string | null
+  changed_by_email: string | null
+  changed_at: string
 }
 
 export interface PayrollEmployeeRate {

@@ -13,6 +13,7 @@ import {
   Settings,
   ChevronRight,
   Building2,
+  Contact,
   LogOut,
   UserCircle,
   Target,
@@ -28,6 +29,7 @@ import { useAuth } from '@/hooks/payroll/useAuth'
 
 const navItems = [
   { href: '/payroll', label: 'Week Dashboard', icon: BarChart2, exact: true },
+  { href: '/payroll/roster', label: 'Roster', icon: Contact },
   { href: '/payroll/employees', label: 'Employees & Rates', icon: Users },
   { href: '/payroll/rate-coverage', label: 'Rate Coverage', icon: CircleDollarSign },
   { href: '/payroll/import', label: 'Workyard Import', icon: Upload },

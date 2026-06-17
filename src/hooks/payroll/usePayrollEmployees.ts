@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import type { PayrollEmployee, PayrollEmployeeRate, PayrollEmployeeDeptSplit } from '@/lib/supabase/types'
+import type { PayrollEmployee, PayrollEmployeeRate, PayrollEmployeeDeptSplit, PayrollEmployeeAudit } from '@/lib/supabase/types'
 
 export function usePayrollEmployees(includeInactive = false) {
   const [employees, setEmployees] = useState<PayrollEmployee[]>([])
@@ -88,6 +88,35 @@ export function usePayrollEmployees(includeInactive = false) {
   }, [])
 
   return { employees, loading, error, refetch: fetch, upsertEmployee, addRate, upsertDeptSplits }
+}
+
+/** Full per-field audit history for one employee, plus a field -> most-recent-change lookup. */
+export function useEmployeeAudit(employeeId: string | null) {
+  const [audit, setAudit] = useState<PayrollEmployeeAudit[]>([])
+  const [loading, setLoading] = useState(false)
+
+  const load = useCallback(async () => {
+    if (!employeeId) { setAudit([]); return }
+    setLoading(true)
+    const supabase = createClient()
+    const { data } = await supabase
+      .from('payroll_employee_audit')
+      .select('*')
+      .eq('employee_id', employeeId)
+      .order('changed_at', { ascending: false })
+    setAudit(data ?? [])
+    setLoading(false)
+  }, [employeeId])
+
+  useEffect(() => { load() }, [load])
+
+  // Most recent change per field (audit is already sorted newest-first).
+  const lastByField: Record<string, PayrollEmployeeAudit> = {}
+  for (const row of audit) {
+    if (!lastByField[row.field]) lastByField[row.field] = row
+  }
+
+  return { audit, lastByField, loading, refetch: load }
 }
 
 export function useEmployeeRates(employeeId: string | null) {
