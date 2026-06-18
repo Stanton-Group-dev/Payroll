@@ -179,6 +179,7 @@ export function buildTools(mode: AgentMode = 'full'): ToolDef[] {
           description:
             'Fully-resolved operation input. Shapes by operation:\n' +
             '- time_entry.add: { employeeId, date (ISO), hours, hourType?, allocation: {mode:"property",propertyId} | {mode:"portfolio",portfolioId} | {mode:"unallocated"}, reason? }\n' +
+            '- time_entry.copy_week: { fromEmployeeId, toEmployeeId, weekId, includeUnallocated?, reason? } — clone one employee\'s whole week of entries onto another (same dates/hours/properties). Resolve both names with resolve_employee and the week with resolve_date (pass the returned week.id as weekId). Use this for "give X the same entries as Y" / "copy Y\'s week to X".\n' +
             '- employee.add: { name, type:"hourly"|"salaried"|"contractor", hourlyRate? (hourly/contractor), weeklyRate? (salaried), trade?, workyardId?, otAllowed?, payTax?, wc?, isManagement?, reason? }\n' +
             '- employee.update: { employeeId, and any of name/type/hourlyRate/weeklyRate/trade/workyardId/otAllowed/payTax/wc/isManagement, reason? }\n' +
             '- employee.deactivate / employee.reactivate: { employeeId, reason? }\n' +
@@ -237,7 +238,10 @@ export function systemPrompt(
     '- A single named property means mode "property". If no location is given, ask; do not silently leave it unallocated unless the user says "unallocated".',
     '- For employee changes (add/update/deactivate/reactivate): adding a new hire needs no resolve (it is a new name); for changes to an existing person, use resolve_employee first (pass includeInactive:true when reactivating). New hires need a type and the matching rate (hourly/contractor → hourlyRate, salaried → weeklyRate); if the type or rate is missing, ask.',
     '- For external projects (non-portfolio client work like "Zimmerman"): adding is a new name (no resolve); to change/deactivate/reactivate an existing one, use resolve_external_project first (includeInactive:true when reactivating). Adding one needs name, clientName, and billedTo; if billedTo is missing, ask who receives the invoice.',
-    '- To make a change, call propose_operation exactly once after everything is resolved. Do not execute anything yourself — the user confirms the preview.',
+    '- To copy one person\'s whole logged week onto another ("give Jose the same entries as Carlos", "copy Carlos\'s week to Jose"): resolve both employees to ids and the week to a weekId (resolve_date → week.id), then propose time_entry.copy_week ONCE. Never try to add the entries one at a time.',
+    '- To make a change, call propose_operation exactly once after everything is resolved.',
+    '- CRITICAL — you CANNOT execute anything. Your only way to change data is to call propose_operation, which shows the user a PREVIEW they must confirm; nothing is written until they click confirm. NEVER say you added, created, copied, queued, removed, "fired", or "will" perform a write. If you have not just called propose_operation in this turn, nothing has happened — do not imply or claim otherwise.',
+    '- If a request needs a capability no single operation provides, say so plainly and propose the closest real operation (or ask a question). Do NOT pretend to perform a batch of writes.',
   ].join('\n')
 }
 

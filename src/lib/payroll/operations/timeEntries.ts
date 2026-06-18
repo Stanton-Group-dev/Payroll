@@ -504,3 +504,162 @@ export const removeTime: Operation<RemoveTimeInput, { entryId: string }> = {
     }
   },
 }
+
+/* ------------------------------------------------------------------ */
+/* copy_week — clone one employee's whole week onto another            */
+/* ------------------------------------------------------------------ */
+
+export const copyWeekSchema = z
+  .object({
+    fromEmployeeId: z.string().uuid(),
+    toEmployeeId: z.string().uuid(),
+    weekId: z.string().uuid(),
+    /** When false (default) skip unallocated / flagged / pending source entries. */
+    includeUnallocated: z.boolean().default(false),
+    reason: z.string().max(500).optional(),
+  })
+  .refine((v) => v.fromEmployeeId !== v.toEmployeeId, {
+    message: 'source and target employee must be different',
+  })
+export type CopyWeekInput = z.infer<typeof copyWeekSchema>
+
+interface SourceEntry {
+  property_id: string | null
+  entry_date: string
+  regular_hours: number
+  ot_hours: number
+  pto_hours: number
+  miles: number
+  is_flagged: boolean
+  flag_reason: string | null
+  pending_resolution: boolean
+}
+
+export interface CopyWeekResult {
+  weekId: string
+  entryIds: string[]
+  count: number
+}
+
+export const copyWeek: Operation<CopyWeekInput, CopyWeekResult> = {
+  name: 'time_entry.copy_week',
+  description:
+    "Copy one employee's time entries for a payroll week onto another employee — same dates, hours, and properties, in one audited action. Skips unallocated/flagged entries unless includeUnallocated is true.",
+  schema: copyWeekSchema,
+  async plan(ctx, input): Promise<Plan<CopyWeekResult>> {
+    const warnings: string[] = []
+    const blockers: string[] = []
+    const changes: PlannedChange[] = []
+
+    const [from, to] = await Promise.all([
+      loadEmployee(ctx, input.fromEmployeeId),
+      loadEmployee(ctx, input.toEmployeeId),
+    ])
+    if (!from) blockers.push(`source employee ${input.fromEmployeeId} not found`)
+    if (!to) blockers.push(`target employee ${input.toEmployeeId} not found`)
+    else if (!to.is_active) blockers.push(`target employee ${to.name} is inactive`)
+
+    const { data: weekRow, error: weekErr } = await ctx.supabase
+      .from('payroll_weeks')
+      .select('id, week_start, status')
+      .eq('id', input.weekId)
+      .maybeSingle()
+    if (weekErr) throw new Error(`Failed to load week: ${weekErr.message}`)
+    if (!weekRow) blockers.push(`payroll week ${input.weekId} not found`)
+    else if (!isWeekEditable(weekRow.status)) {
+      blockers.push(`week of ${weekRow.week_start} is ${weekRow.status} and locked`)
+    }
+
+    let srcRows: SourceEntry[] = []
+    if (from) {
+      const { data, error } = await ctx.supabase
+        .from('payroll_time_entries')
+        .select('property_id, entry_date, regular_hours, ot_hours, pto_hours, miles, is_flagged, flag_reason, pending_resolution')
+        .eq('employee_id', input.fromEmployeeId)
+        .eq('payroll_week_id', input.weekId)
+        .eq('is_active', true)
+        .order('entry_date')
+      if (error) throw new Error(`Failed to load source entries: ${error.message}`)
+      srcRows = (data ?? []) as SourceEntry[]
+      if (!input.includeUnallocated) {
+        srcRows = srcRows.filter((r) => r.property_id !== null && !r.is_flagged && !r.pending_resolution)
+      }
+    }
+    if (from && srcRows.length === 0) {
+      blockers.push(`${from.name} has no ${input.includeUnallocated ? '' : 'clean allocated '}entries in that week to copy`)
+    }
+
+    // Refuse to stack copies onto a target that already has entries this week.
+    if (to && weekRow) {
+      const { count, error } = await ctx.supabase
+        .from('payroll_time_entries')
+        .select('id', { count: 'exact', head: true })
+        .eq('employee_id', input.toEmployeeId)
+        .eq('payroll_week_id', input.weekId)
+        .eq('is_active', true)
+      if (error) throw new Error(`Failed to check target entries: ${error.message}`)
+      if ((count ?? 0) > 0) {
+        blockers.push(
+          `${to.name} already has ${count} active ${count === 1 ? 'entry' : 'entries'} this week — remove them first to avoid duplicating`
+        )
+      }
+    }
+
+    const reg = round2(srcRows.reduce((s, r) => s + Number(r.regular_hours), 0))
+    const ot = round2(srcRows.reduce((s, r) => s + Number(r.ot_hours), 0))
+    const pto = round2(srcRows.reduce((s, r) => s + Number(r.pto_hours), 0))
+    const fromName = from?.name ?? input.fromEmployeeId
+    const toName = to?.name ?? input.toEmployeeId
+    const weekLabel = weekRow ? `week of ${weekRow.week_start}` : 'week'
+
+    changes.push({
+      kind: 'create',
+      entity: 'time_entry',
+      description: `${srcRows.length} entries → ${toName} (${reg}h reg${ot ? `, ${ot}h OT` : ''}${pto ? `, ${pto}h PTO` : ''}), cloned from ${fromName}`,
+    })
+    const byDate = new Map<string, number>()
+    for (const r of srcRows) byDate.set(r.entry_date, (byDate.get(r.entry_date) ?? 0) + 1)
+    for (const [date, n] of [...byDate.entries()].sort()) {
+      changes.push({ kind: 'create', entity: 'time_entry', description: `  • ${date}: ${n} ${n === 1 ? 'entry' : 'entries'}` })
+    }
+
+    return {
+      operation: this.name,
+      summary: `Copy ${srcRows.length} entries (${weekLabel}) from ${fromName} to ${toName}`,
+      weekId: weekRow?.id ?? null,
+      targetType: 'time_entry',
+      targetId: input.toEmployeeId,
+      changes,
+      warnings,
+      blockers,
+      input,
+      async commit(commitCtx): Promise<CopyWeekResult> {
+        const rows = srcRows.map((r) => ({
+          payroll_week_id: input.weekId,
+          employee_id: input.toEmployeeId,
+          property_id: r.property_id,
+          entry_date: r.entry_date,
+          regular_hours: r.regular_hours,
+          ot_hours: r.ot_hours,
+          pto_hours: r.pto_hours,
+          miles: r.miles,
+          source: 'manual_manager',
+          is_flagged: r.is_flagged,
+          flag_reason: r.flag_reason,
+          pending_resolution: r.pending_resolution,
+          created_by: commitCtx.actor.id,
+        }))
+        const { data: inserted, error } = await commitCtx.supabase
+          .from('payroll_time_entries')
+          .insert(rows)
+          .select('id')
+        if (error) throw new Error(`Failed to copy time entries: ${error.message}`)
+        return {
+          weekId: input.weekId,
+          entryIds: (inserted ?? []).map((x: { id: string }) => x.id),
+          count: rows.length,
+        }
+      },
+    }
+  },
+}

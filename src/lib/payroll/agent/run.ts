@@ -14,6 +14,21 @@ import { buildTools, dispatchTool, systemPrompt, type AgentMode } from './tools'
 const DEFAULT_MODEL = 'claude-sonnet-4-6'
 const MAX_TURNS = 6
 
+/**
+ * Belt-and-suspenders guardrail. The agent has no execute capability — a write
+ * only happens when runAgent returns a `proposal` (a preview the user confirms).
+ * If the model instead ends a turn with text that *claims* it performed or will
+ * perform a write while emitting no proposal, append a correction so the user is
+ * never misled into thinking data changed. Only applies in write-capable mode.
+ */
+const EXEC_CLAIM =
+  /\bfir(?:e|ed|ing) them all\b|\bqueue(?:d)? (?:them|it|those|all)\b|\bqueued? up\b|\bi(?:'ve| have| just)? (?:added|created|copied|cloned|inserted|removed|deleted|updated|saved|logged|queued|fired)\b|\bi'?ll (?:add|create|copy|clone|insert|remove|delete|update|fire|queue)\b/i
+
+function guardClaims(text: string, mode: AgentMode): string {
+  if (mode !== 'full' || !text || !EXEC_CLAIM.test(text)) return text
+  return `${text}\n\n_(Note: nothing has been changed — I can only propose an action for you to confirm. Tell me to go ahead and I'll show a preview to approve.)_`
+}
+
 export interface ChatTurn {
   role: 'user' | 'assistant'
   content: string
@@ -86,7 +101,7 @@ export async function runAgent(
     )
 
     if (resp.stop_reason !== 'tool_use' || toolUses.length === 0) {
-      return { assistantText }
+      return { assistantText: guardClaims(assistantText, mode) }
     }
 
     messages.push({ role: 'assistant', content: resp.content })
@@ -139,6 +154,6 @@ export async function runAgent(
 
   return {
     assistantText:
-      assistantText || 'I wasn\'t able to resolve that into a single action — could you rephrase?',
+      guardClaims(assistantText, mode) || 'I wasn\'t able to resolve that into a single action — could you rephrase?',
   }
 }

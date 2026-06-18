@@ -4,7 +4,7 @@
  * up here by name, so a new audited capability is added in exactly one place.
  */
 import type { Operation, ConsoleRole } from './core'
-import { addTime, adjustTime, removeTime } from './timeEntries'
+import { addTime, adjustTime, removeTime, copyWeek } from './timeEntries'
 import {
   addEmployee,
   updateEmployee,
@@ -43,6 +43,7 @@ const REGISTRY: Record<string, RegisteredOperation> = {
   [addTime.name]: register(addTime as unknown as Operation<never, never>, 'manager'),
   [adjustTime.name]: register(adjustTime as unknown as Operation<never, never>, 'manager'),
   [removeTime.name]: register(removeTime as unknown as Operation<never, never>, 'manager'),
+  [copyWeek.name]: register(copyWeek as unknown as Operation<never, never>, 'manager'),
   // Employee master-record changes are admin-only.
   [addEmployee.name]: register(addEmployee as unknown as Operation<never, never>, 'admin'),
   [updateEmployee.name]: register(updateEmployee as unknown as Operation<never, never>, 'admin'),
@@ -66,7 +67,7 @@ export function listOperations(): RegisteredOperation[] {
   return Object.values(REGISTRY)
 }
 
-export { addTime, adjustTime, removeTime }
+export { addTime, adjustTime, removeTime, copyWeek }
 export { addEmployee, updateEmployee, deactivateEmployee, reactivateEmployee }
 export {
   addExternalProject,
