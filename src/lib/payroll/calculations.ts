@@ -246,8 +246,10 @@ export function calculatePayroll(
     })
   }
 
-  // Method A: Direct labor by property
+  // Method A: Direct labor by property. Also capture each employee's per-property
+  // labor hours — the fallback weight for mileage when miles weren't logged per row.
   const propLaborCost: Record<string, number> = {}
+  const empHoursByProp: Record<string, Record<string, number>> = {}
   for (const entry of entries) {
     if (!entry.property_id) continue
     const emp = employeeMap[entry.employee_id]
@@ -256,6 +258,11 @@ export function calculatePayroll(
     // OT premium flows into the property's labor cost too (it bears the actual wage).
     const cost = (entry.regular_hours ?? 0) * rate + (entry.ot_hours ?? 0) * rate * otMultiplier(emp.type, emp.department)
     propLaborCost[entry.property_id] = (propLaborCost[entry.property_id] ?? 0) + cost
+    const hours = (entry.regular_hours ?? 0) + (entry.ot_hours ?? 0)
+    if (hours > 0) {
+      ;(empHoursByProp[entry.employee_id] ??= {})[entry.property_id] =
+        (empHoursByProp[entry.employee_id][entry.property_id] ?? 0) + hours
+    }
   }
 
   // Method B: Unit-weighted spread across the whole portfolio.
@@ -286,11 +293,16 @@ export function calculatePayroll(
   }
 
   // Method C: Direct mileage by property. Each employee's approved reimbursement is
-  // allocated across the properties where they logged miles, proportional to the raw
-  // miles on their time entries. Because the amount is already based on approved
-  // (possibly trimmed) miles, the per-property fractions scale the billing down too —
-  // properties are billed only for what was approved. Miles on entries without a
-  // property (or with no logged miles) leave that portion paid-but-unbilled.
+  // allocated across the properties they touched that week, weighted two ways in
+  // priority order:
+  //   1. Per-property MILES logged on their time entries — the precise signal. When
+  //      present, miles on entries without a property (or with no logged miles)
+  //      leave that portion paid-but-unbilled, by design.
+  //   2. Fallback — per-property LABOR HOURS. Workyard often exports mileage as one
+  //      weekly lump (entry.miles = 0 on every row), so the precise signal is absent.
+  //      Rather than leave the whole reimbursement paid-but-unbilled, spread it across
+  //      the properties the employee actually billed labor to that week, proportional
+  //      to hours worked — "where they drove" approximated by "where they worked".
   const empMilesByProp: Record<string, Record<string, number>> = {}
   const empTotalMiles: Record<string, number> = {}
   for (const entry of entries) {
@@ -305,10 +317,17 @@ export function calculatePayroll(
 
   const propMileageCost: Record<string, number> = {}
   for (const [empId, amt] of Object.entries(approvedMileage)) {
-    const totalMiles = empTotalMiles[empId] ?? 0
-    if (totalMiles <= 0) continue // paid but unbilled — no per-property miles to allocate against
-    for (const [propId, miles] of Object.entries(empMilesByProp[empId] ?? {})) {
-      propMileageCost[propId] = (propMileageCost[propId] ?? 0) + amt * (miles / totalMiles)
+    // Prefer per-property miles; fall back to per-property labor hours.
+    const milesByProp = empMilesByProp[empId]
+    const hasMiles = milesByProp && Object.keys(milesByProp).length > 0 && (empTotalMiles[empId] ?? 0) > 0
+    const weights = hasMiles ? milesByProp : empHoursByProp[empId]
+    if (!weights) continue // paid but unbilled — no property miles or labor to allocate against
+    const totalWeight = hasMiles
+      ? (empTotalMiles[empId] ?? 0)                                  // includes no-property miles (their share leaks, by design)
+      : Object.values(weights).reduce((s, w) => s + w, 0)           // labor hours sum across this employee's properties
+    if (totalWeight <= 0) continue
+    for (const [propId, w] of Object.entries(weights)) {
+      propMileageCost[propId] = (propMileageCost[propId] ?? 0) + amt * (w / totalWeight)
     }
   }
 
