@@ -12,7 +12,12 @@ export interface WorkyardRow {
   /** Miles driven, from the Workyard payroll export. Optional — the API path does not expose it. */
   miles?: number
   timecardId: string
+  /** Cost-code CODE (e.g. "S0020" or "001"). For overhead/vendor projects an S-code here
+   *  names the destination building the time bills to. */
   costCode: string
+  /** Cost-code human NAME (e.g. "31 Park - Material Pickup", "Work Order - Standard").
+   *  This is what maps to a customer-facing activity. */
+  costCodeName: string
 }
 
 export interface ParseResult {
@@ -61,6 +66,7 @@ export function parseWorkyardCSV(csvText: string): ParseResult {
     const entryDate = get(cells, 'date') || get(cells, 'entry_date') || get(cells, 'work_date')
     const timecardId = get(cells, 'timecard_id') || get(cells, 'id') || `row-${i}`
     const costCode = get(cells, 'cost_code') || get(cells, 'cost_codes') || ''
+    const costCodeName = get(cells, 'cost_code_name') || ''
 
     const regularHours = parseFloat(get(cells, 'regular_hours') || get(cells, 'reg_hours') || '0') || 0
     const otHours = parseFloat(get(cells, 'ot_hours') || get(cells, 'overtime_hours') || '0') || 0
@@ -84,6 +90,7 @@ export function parseWorkyardCSV(csvText: string): ParseResult {
       miles,
       timecardId,
       costCode,
+      costCodeName,
     })
   }
 

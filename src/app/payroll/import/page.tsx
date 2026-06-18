@@ -247,6 +247,8 @@ export default function ImportPage() {
           is_flagged: row.status === 'flagged',
           flag_reason: row.flag ?? null,
           is_overhead_spread: row.overheadSpread ?? false,
+          cost_code: row.costCode || null,
+          cost_code_name: row.costCodeName || null,
         })
         if (row.status === 'flagged') flagged++
         else imported++

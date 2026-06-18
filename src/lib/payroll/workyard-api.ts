@@ -317,6 +317,7 @@ export async function fetchWorkyardTimecards(
         ptoHours: 0,
         timecardId,
         costCode: '',
+        costCodeName: '',
       })
       continue
     }
@@ -337,7 +338,10 @@ export async function fetchWorkyardTimecards(
         otHours: Math.round(((totalOtSecs + totalDtSecs) * proportion / 3600) * 100) / 100,
         ptoHours: 0,
         timecardId,
+        // costCode keeps the NAME here (unchanged activity behavior); the CSV path supplies
+        // the real code. costCodeName captures the human label for both.
         costCode: alloc.job_code?.name ?? '',
+        costCodeName: alloc.job_code?.name ?? '',
       })
     }
   }

@@ -192,6 +192,12 @@ export interface PayrollTimeEntry {
   /** When true: no single billable property — wages are spread across all billable
    *  properties by unit count (like salaried) and the row is excluded from unallocated holds. */
   is_overhead_spread?: boolean
+  /** Workyard cost-code CODE (e.g. "S0020", "001"). For vendor/overhead projects an
+   *  S-code here names the destination building the hours bill to. Null when unknown. */
+  cost_code?: string | null
+  /** Workyard cost-code human NAME (e.g. "31 Park - Material Pickup", "Work Order - Standard").
+   *  Drives the customer-facing activity label. */
+  cost_code_name?: string | null
   spread_event_id: string | null
   created_at: string
   updated_at: string
