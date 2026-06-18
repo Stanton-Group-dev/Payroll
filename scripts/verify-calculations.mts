@@ -99,19 +99,25 @@ console.log('\n== 2. OVERTIME by worker class: W2 hourly 1.5x, contractor 1.0x =
     [entry({ employee_id: 'B', regular_hours: 40, ot_hours: 10 })],
     [], NO_FEES, []
   )
+  // CONTRACTOR: not OT-eligible → OT hours fold into regular at straight time.
   const bc = get(c99, 'B')
-  check('contractor ot_wages 200 = straight rate (no premium)', bc.ot_wages === 200, `${bc.ot_wages}`)
-  check('contractor gross 1000', bc.gross_pay === 1000, `${bc.gross_pay}`)
+  check('contractor ot_wages 0 (no separate OT)', bc.ot_wages === 0, `${bc.ot_wages}`)
+  check('contractor ot_hours 0 (folded into regular)', bc.ot_hours === 0, `${bc.ot_hours}`)
+  check('contractor regular_hours 50 (40+10 folded)', bc.regular_hours === 50, `${bc.regular_hours}`)
+  check('contractor regular_wages 1000', bc.regular_wages === 1000, `${bc.regular_wages}`)
+  check('contractor gross 1000 (unchanged)', bc.gross_pay === 1000, `${bc.gross_pay}`)
 
-  // W2 hourly WITHOUT OT rights (ot_allowed=false): OT hours paid at straight time.
-  //   ot = 10 * 20 * 1.0 = 200; gross = 1000 (no time-and-a-half premium)
+  // W2 hourly WITHOUT OT rights (ot_allowed=false): OT folds into regular at straight time.
+  //   no premium, no OT column; regular = 50h * 20 = 1000; gross = 1000
   const noOt = calculatePayroll(
     [emp({ id: 'B', name: 'Bo', type: 'hourly', hourly_rate: 20, ot_allowed: false })],
     [entry({ employee_id: 'B', regular_hours: 40, ot_hours: 10 })],
     [], NO_FEES, []
   )
   const bn = get(noOt, 'B')
-  check('no-OT-rights ot_wages 200 = straight time (no premium)', bn.ot_wages === 200, `${bn.ot_wages}`)
+  check('no-OT-rights ot_wages 0 (no premium)', bn.ot_wages === 0, `${bn.ot_wages}`)
+  check('no-OT-rights ot_hours 0 (folded into regular)', bn.ot_hours === 0, `${bn.ot_hours}`)
+  check('no-OT-rights regular_hours 50', bn.regular_hours === 50, `${bn.regular_hours}`)
   check('no-OT-rights gross 1000 (not 1100)', bn.gross_pay === 1000, `${bn.gross_pay}`)
 }
 

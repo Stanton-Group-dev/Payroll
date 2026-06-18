@@ -168,11 +168,24 @@ export function calculatePayroll(
     const emp = employeeMap[entry.employee_id]
     if (!emp) continue
     const rate = emp.hourly_rate ?? 0
-    empData[entry.employee_id].regular_hours += entry.regular_hours ?? 0
-    empData[entry.employee_id].ot_hours += entry.ot_hours ?? 0
-    empData[entry.employee_id].pto_hours += entry.pto_hours ?? 0
-    empData[entry.employee_id].regular_wages += (entry.regular_hours ?? 0) * rate
-    empData[entry.employee_id].ot_wages += (entry.ot_hours ?? 0) * rate * otMultiplier(emp.type, emp.department, emp.ot_allowed)
+    const reg = entry.regular_hours ?? 0
+    const ot = entry.ot_hours ?? 0
+    const d = empData[entry.employee_id]
+    d.pto_hours += entry.pto_hours ?? 0
+    // Only true OT-eligible employees (W2 hourly, OT-authorized, non-construction)
+    // keep a separate OT column and the 1.5× premium. For everyone else — contractors,
+    // construction, salaried, and anyone without OT rights (ot_allowed=false) — the
+    // "OT" hours are paid at straight time and folded into regular hours, so the OT
+    // column reads zero for people who don't get overtime.
+    if (otMultiplier(emp.type, emp.department, emp.ot_allowed) === 1.5) {
+      d.regular_hours += reg
+      d.ot_hours += ot
+      d.regular_wages += reg * rate
+      d.ot_wages += ot * rate * 1.5
+    } else {
+      d.regular_hours += reg + ot
+      d.regular_wages += (reg + ot) * rate
+    }
   }
 
   // Salaried employees: use weekly_rate directly
