@@ -13,6 +13,13 @@ import { sendSms, isTwilioLive } from '@/lib/payroll/twilio-api'
 /** Below this many unallocated hours we don't hold or notify (≈15 min). */
 export const UNALLOCATED_HOLD_THRESHOLD_HOURS = 0.25
 
+/**
+ * Sentinel stamped on the no-property time entries a waive deactivates. Lets the
+ * reverse (un-waive) reactivate exactly the rows the waive touched — never a row that
+ * was soft-deleted for some other reason.
+ */
+export const WAIVE_MARKER = 'unallocated_waived'
+
 const round2 = (n: number) => Math.round(n * 100) / 100
 
 export interface UnallocatedEmployee {
@@ -184,22 +191,39 @@ export async function applyUnallocatedHolds(
 
 /**
  * Waive (write off) just the unallocated hours for one employee this week. Unlike a
- * hold, the employee is NOT pulled from the run — they're still paid for their
- * allocated work; only the no-property hours are dropped from pay (they were never
- * billed to a property anyway). No SMS is sent. Idempotent on (week, employee);
- * reversible via {@link unwaiveUnallocated}. Records a snapshot of the hours written
- * off for the audit trail.
+ * hold, the employee is NOT pulled from the run — they keep pay for their allocated
+ * work; only the no-property hours are written off (they were never billed anyway).
+ *
+ * Crucially this DEACTIVATES the underlying no-property time entries (is_active=false,
+ * stamped with WAIVE_MARKER). Filtering them out of one week's pay math is not enough:
+ * left active, the hours still read as unresolved unallocated time and resurface as an
+ * owed prior-week balance / carry-forward candidate. Writing them off neutralizes them
+ * everywhere — pay, the timesheet "unresolved" list, and any forward carry.
+ *
+ * No SMS is sent. Idempotent on (week, employee); reversible via {@link unwaiveUnallocated}.
  */
 export async function waiveUnallocated(
   admin: SupabaseClient,
   opts: { weekId: string; employeeId: string; userId: string | null },
-): Promise<{ employee_id: string; unallocated_hours: number }> {
-  // Snapshot the hours being written off (threshold 0 — waive any amount, not just
-  // those over the hold threshold the panel surfaces).
-  const all = await detectUnallocatedEmployees(admin, opts.weekId, 0)
-  const hours = all.find(e => e.employee_id === opts.employeeId)?.unallocated_hours ?? 0
+): Promise<{ employee_id: string; unallocated_hours: number; entries_written_off: number }> {
+  // The live, no-property entries for this employee/week that carry actual work hours.
+  const { data: rows, error: selErr } = await admin
+    .from('payroll_time_entries')
+    .select('id, regular_hours, ot_hours')
+    .eq('payroll_week_id', opts.weekId)
+    .eq('employee_id', opts.employeeId)
+    .is('property_id', null)
+    .eq('is_active', true)
+  if (selErr) throw new Error(selErr.message)
 
-  const { error } = await admin
+  const work = (rows ?? []).filter(r => (r.regular_hours ?? 0) + (r.ot_hours ?? 0) > 0)
+  const hours = round2(work.reduce((s, r) => s + (r.regular_hours ?? 0) + (r.ot_hours ?? 0), 0))
+
+  // Record the waive FIRST (drives the review panel + audit trail; carries the hour
+  // snapshot). Doing this before touching entries means that if the 'waived' status
+  // isn't valid yet — e.g. the widening migration hasn't been applied — the action
+  // fails here cleanly, before any entry is deactivated.
+  const { error: holdErr } = await admin
     .from('payroll_employee_holds')
     .upsert(
       {
@@ -217,19 +241,46 @@ export async function waiveUnallocated(
       },
       { onConflict: 'payroll_week_id,employee_id' },
     )
-  if (error) throw new Error(error.message)
-  return { employee_id: opts.employeeId, unallocated_hours: hours }
+  if (holdErr) throw new Error(holdErr.message)
+
+  // Write off the entries: deactivate + stamp so the reverse can find exactly these.
+  // Also clear any pending flag so they stop demanding resolution.
+  if (work.length > 0) {
+    const { error: updErr } = await admin
+      .from('payroll_time_entries')
+      .update({
+        is_active: false,
+        flag_reason: WAIVE_MARKER,
+        pending_resolution: false,
+        pending_note: null,
+        pending_since: null,
+      })
+      .in('id', work.map(r => r.id))
+    if (updErr) throw new Error(updErr.message)
+  }
+
+  return { employee_id: opts.employeeId, unallocated_hours: hours, entries_written_off: work.length }
 }
 
 /**
- * Reverse a waive: pay the employee's unallocated hours again. Deletes the waive row
- * (only when it's actually 'waived', so a real hold/release is never removed by
- * mistake).
+ * Reverse a waive: restore the written-off entries (so the hours are paid again) and
+ * drop the waive row. Reactivation is scoped to WAIVE_MARKER-stamped rows so a genuinely
+ * deleted entry is never revived. The waive-row delete is guarded to status='waived' so
+ * a real hold/release is never removed by mistake.
  */
 export async function unwaiveUnallocated(
   admin: SupabaseClient,
   opts: { weekId: string; employeeId: string },
 ): Promise<void> {
+  const { error: updErr } = await admin
+    .from('payroll_time_entries')
+    .update({ is_active: true, flag_reason: null })
+    .eq('payroll_week_id', opts.weekId)
+    .eq('employee_id', opts.employeeId)
+    .is('property_id', null)
+    .eq('flag_reason', WAIVE_MARKER)
+  if (updErr) throw new Error(updErr.message)
+
   const { error } = await admin
     .from('payroll_employee_holds')
     .delete()
