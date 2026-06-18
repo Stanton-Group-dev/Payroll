@@ -17,6 +17,7 @@ import {
   type PayrollComparison,
 } from '@/lib/payroll/calculations'
 import { parseRelativeDate, resolveWeekForDate } from '@/lib/payroll/resolve/dates'
+import { curatedToProperty, CURATED_PROPERTY_COLUMNS, type CuratedPropertyRow } from '@/lib/payroll/properties'
 import type {
   PayrollEmployee,
   PayrollEmployeeRate,
@@ -395,16 +396,13 @@ export async function queryPayrollComparison(
     ctx.supabase.from('payroll_employees').select('id, name, type, hourly_rate, weekly_rate, pay_tax, wc').eq('is_active', true),
     ctx.supabase.from('payroll_employee_rates').select('id, employee_id, rate, effective_date'),
     ctx.supabase.from('payroll_management_fee_config').select('id, rate_pct, portfolio_id, effective_date'),
-    ctx.supabase
-      .from('properties')
-      .select('id, appfolio_property_id, code, name, total_units, portfolio_id, address, billing_llc, is_active')
-      .eq('is_active', true),
+    ctx.supabase.from('payroll_property').select(CURATED_PROPERTY_COLUMNS).eq('is_active', true),
     ctx.supabase.from('portfolios').select('id, name'),
   ])
   const employees = (empData ?? []) as PayrollEmployee[]
   const rates = (rateData ?? []) as PayrollEmployeeRate[]
   const feeConfigs = (feeData ?? []) as PayrollManagementFeeConfig[]
-  const properties = (propData ?? []) as Property[]
+  const properties = (propData ?? []).map(r => curatedToProperty(r as unknown as CuratedPropertyRow)) as Property[]
   const portfolios = (portData ?? []) as { id: string; name: string }[]
 
   const currentResult = await runWeekResult(ctx, target, employees, rates, feeConfigs, properties)

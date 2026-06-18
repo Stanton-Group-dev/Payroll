@@ -2,7 +2,12 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { isNonBillableProperty } from '@/lib/payroll/properties'
+import {
+  isNonBillableProperty,
+  curatedToProperty,
+  CURATED_PROPERTY_COLUMNS,
+  type CuratedPropertyRow,
+} from '@/lib/payroll/properties'
 import type {
   PayrollWeek,
   PayrollEmployee,
@@ -45,7 +50,7 @@ export function usePayrollWeekReview(weekId: string) {
       supabase.from('payroll_time_entries').select('*').eq('payroll_week_id', weekId).eq('is_flagged', false).eq('is_active', true),
       supabase.from('payroll_adjustments').select('*').eq('payroll_week_id', weekId).eq('is_active', true),
       supabase.from('payroll_management_fee_config').select('*').order('effective_date', { ascending: false }),
-      supabase.from('properties').select('id, appfolio_property_id, code, name, total_units, portfolio_id, address, billing_llc, is_active, include_in_invoicing').eq('is_active', true),
+      supabase.from('payroll_property').select(CURATED_PROPERTY_COLUMNS).eq('is_active', true),
       supabase.from('portfolios').select('id, include_in_invoicing'),
       supabase.from('payroll_approvals').select('*').eq('payroll_week_id', weekId).eq('stage', 'payroll'),
       supabase.from('payroll_employee_rates').select('*'),
@@ -77,7 +82,7 @@ export function usePayrollWeekReview(weekId: string) {
     )
     setAdjustments(adjRes.data ?? [])
     setFeeConfigs(feeRes.data ?? [])
-    const props = propRes.data ?? []
+    const props = (propRes.data ?? []).map(r => curatedToProperty(r as unknown as CuratedPropertyRow))
     setProperties(props)
     // Properties excluded from invoicing: own flag off, or their portfolio's flag off.
     // (Absence of a flag means included — default true.) Used to mark/hide rows in the

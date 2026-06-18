@@ -67,9 +67,10 @@ export async function resolveProperty(
   query: string,
   portfolioId?: string
 ): Promise<Resolution<ResolvedProperty>> {
+  // Resolve against the curated overlay so command-bar matches/grouping use corrected data.
   let q = ctx.supabase
-    .from('properties')
-    .select('id, code, name, portfolio_id, total_units')
+    .from('payroll_property')
+    .select('id:property_id, code, name, portfolio_id, total_units')
     .eq('is_active', true)
     .order('name')
   if (portfolioId) q = q.eq('portfolio_id', portfolioId)
@@ -109,8 +110,8 @@ export async function propertiesInPortfolio(
   portfolioId: string
 ): Promise<ResolvedProperty[]> {
   const { data, error } = await ctx.supabase
-    .from('properties')
-    .select('id, code, name, portfolio_id, total_units')
+    .from('payroll_property')
+    .select('id:property_id, code, name, portfolio_id, total_units')
     .eq('is_active', true)
     .eq('portfolio_id', portfolioId)
     .order('name')

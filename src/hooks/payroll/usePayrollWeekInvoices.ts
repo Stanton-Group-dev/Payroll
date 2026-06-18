@@ -2,8 +2,13 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { isNonBillableProperty } from '@/lib/payroll/properties'
-import type { PayrollWeek } from '@/lib/supabase/types'
+import {
+  isNonBillableProperty,
+  curatedToProperty,
+  CURATED_PROPERTY_COLUMNS,
+  type CuratedPropertyRow,
+} from '@/lib/payroll/properties'
+import type { PayrollWeek, Property } from '@/lib/supabase/types'
 
 export interface PropertyCost {
   property_id: string
@@ -19,22 +24,11 @@ export interface PropertyCost {
   portfolio_owner_llc: string | null
 }
 
-interface WeeklyPropertyCostRow {
-  payroll_week_id: string
+interface WeeklyCostRow {
   property_id: string
   labor_cost: number | null
   spread_cost: number | null
   total_cost: number
-  property: {
-    id: string
-    code: string
-    name: string
-    total_units: number | null
-    portfolio_id: string | null
-    billing_llc: string | null
-    include_in_invoicing: boolean | null
-    portfolio: { owner_llc: string | null; include_in_invoicing: boolean | null } | null
-  } | null
 }
 
 export function usePayrollWeekInvoices(weekId: string) {
@@ -49,29 +43,43 @@ export function usePayrollWeekInvoices(weekId: string) {
     setLoading(true)
     setError(null)
     const supabase = createClient()
-    const [weekRes, costsRes] = await Promise.all([
+    // Property attributes (owner LLC, include flag, name, units) come from the curated
+    // payroll_property overlay — never the AppFolio-synced `properties` table — so corrections
+    // survive re-imports. Costs still key on the shared property_id (= properties.id).
+    const [weekRes, costsRes, propsRes, portRes] = await Promise.all([
       supabase.from('payroll_weeks').select('*').eq('id', weekId).single(),
-      supabase.from('payroll_weekly_property_costs').select(`
-        payroll_week_id, property_id, labor_cost, spread_cost, total_cost,
-        property:properties(id, code, name, total_units, portfolio_id, billing_llc, include_in_invoicing, portfolio:portfolios(owner_llc, include_in_invoicing))
-      `).eq('payroll_week_id', weekId),
+      supabase.from('payroll_weekly_property_costs')
+        .select('property_id, labor_cost, spread_cost, total_cost')
+        .eq('payroll_week_id', weekId),
+      supabase.from('payroll_property').select(CURATED_PROPERTY_COLUMNS),
+      supabase.from('portfolios').select('id, include_in_invoicing'),
     ])
     if (weekRes.error) { setError(weekRes.error.message); setLoading(false); return }
     setWeek(weekRes.data)
 
+    const curatedById = new Map<string, Property>()
+    for (const row of (propsRes.data ?? [])) {
+      const p = curatedToProperty(row as unknown as CuratedPropertyRow)
+      curatedById.set(p.id, p)
+    }
+    // Whole portfolios turned off in Invoicing settings (absence of flag = included).
+    const excludedPortfolios = new Set(
+      (portRes.data ?? [])
+        .filter((p: { include_in_invoicing?: boolean }) => p.include_in_invoicing === false)
+        .map((p: { id: string }) => p.id),
+    )
+
     const costs: PropertyCost[] = []
     for (const row of (costsRes.data ?? [])) {
-      const typedRow = row as unknown as WeeklyPropertyCostRow
-      const prop = typedRow.property
+      const typedRow = row as unknown as WeeklyCostRow
+      const prop = curatedById.get(typedRow.property_id)
       if (!prop) continue
-      // Never bill delete-marked / test-placeholder rows, no matter what their
-      // include_in_invoicing flag says — the AppFolio re-sync keeps flipping that
-      // flag back on, which is why these kept reappearing on invoices.
+      // Never bill delete-marked / test-placeholder rows, nor properties (or whole
+      // portfolios) turned off in Invoicing settings. The curated overlay's include flag
+      // is AppFolio-proof, so these stay off for good.
       if (isNonBillableProperty(prop)) continue
-      // Skip properties (or whole portfolios) turned off in Invoicing settings.
-      // Absence of the flag means included (default true).
       if (prop.include_in_invoicing === false) continue
-      if (prop.portfolio?.include_in_invoicing === false) continue
+      if (prop.portfolio_id != null && excludedPortfolios.has(prop.portfolio_id)) continue
       const labor = typedRow.labor_cost ?? 0
       const spread = typedRow.spread_cost ?? 0
       const mgmt_fee = typedRow.total_cost - labor - spread
@@ -85,8 +93,10 @@ export function usePayrollWeekInvoices(weekId: string) {
         mgmt_fee: Math.max(0, mgmt_fee),
         total_cost: typedRow.total_cost,
         portfolio_id: prop.portfolio_id,
+        // owner_llc already resolves billing_llc-or-portfolio-owner at seed time, so it is
+        // the single owner key here; the portfolio_owner_llc fallback is no longer needed.
         billing_llc: prop.billing_llc ?? null,
-        portfolio_owner_llc: prop.portfolio?.owner_llc ?? null,
+        portfolio_owner_llc: null,
       })
     }
     setPropertyCosts(costs)

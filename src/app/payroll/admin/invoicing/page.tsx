@@ -64,8 +64,8 @@ export default function InvoicingSettingsPage() {
     const supabase = createClient()
     const [portRes, propRes] = await Promise.all([
       supabase.from('portfolios').select('id, name, include_in_invoicing').eq('is_active', true).order('name'),
-      supabase.from('properties')
-        .select('id, code, name, total_units, portfolio_id, billing_llc, include_in_invoicing')
+      supabase.from('payroll_property')
+        .select('id:property_id, code, name, total_units, portfolio_id, billing_llc:owner_llc, include_in_invoicing')
         .eq('is_active', true).order('code'),
     ])
     if (portRes.error || propRes.error) {
@@ -106,12 +106,31 @@ export default function InvoicingSettingsPage() {
   const toggleProperty = useCallback(async (id: string, next: boolean) => {
     setProperties(prev => prev.map(p => (p.id === id ? { ...p, include_in_invoicing: next } : p)))
     const supabase = createClient()
-    const { error: err } = await supabase.from('properties').update({ include_in_invoicing: next }).eq('id', id)
+    // Write the curated overlay (keyed by property_id) — AppFolio re-imports can't undo this.
+    const { error: err } = await supabase.from('payroll_property').update({ include_in_invoicing: next }).eq('property_id', id)
     if (err) {
       setError(err.message)
       setProperties(prev => prev.map(p => (p.id === id ? { ...p, include_in_invoicing: !next } : p)))
     }
   }, [])
+
+  const [syncing, setSyncing] = useState(false)
+  const [syncMsg, setSyncMsg] = useState<string | null>(null)
+
+  // Pull any AppFolio properties that don't have a curated row yet into payroll_property.
+  // Insert-missing only — never overwrites existing curated corrections.
+  const syncNewProperties = useCallback(async () => {
+    setSyncing(true); setSyncMsg(null); setError(null)
+    const supabase = createClient()
+    const { data, error: err } = await supabase.rpc('payroll_property_reconcile')
+    if (err) { setError(err.message) }
+    else {
+      const n = (data as number) ?? 0
+      setSyncMsg(`Synced — ${n} new ${n === 1 ? 'property' : 'properties'} added.`)
+      await load()
+    }
+    setSyncing(false)
+  }, [load])
 
   const toggleExpand = (key: string) =>
     setExpanded(prev => {
@@ -168,7 +187,25 @@ export default function InvoicingSettingsPage() {
           A property is invoiced only when <strong>both</strong> its own switch and its portfolio&apos;s switch are on.
           Properties with 0 or 1 units were turned off automatically (import artifacts / non-billable stubs) — flip
           any back on if they should be billed. Changes apply the next time invoices are generated for a week.
+          These switches live in the payroll-owned <code>payroll_property</code> record, so they survive AppFolio re-imports.
         </InfoBlock>
+
+        {isAdmin && (
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={syncNewProperties}
+              disabled={syncing}
+              className="inline-flex items-center gap-2 border border-[var(--border)] bg-white px-3 py-1.5 text-sm text-[var(--ink)] hover:bg-[var(--bg-section)] disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {syncing ? 'Syncing…' : 'Sync new properties'}
+            </button>
+            <span className="text-xs text-[var(--muted)]">
+              Pulls any new AppFolio buildings into the curated list (never overwrites your corrections).
+            </span>
+            {syncMsg && <span className="text-xs text-[var(--success)]">{syncMsg}</span>}
+          </div>
+        )}
 
         {/* Summary */}
         <div className="grid grid-cols-3 border border-[var(--border)] divide-x divide-[var(--divider)] bg-white">

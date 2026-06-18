@@ -21,7 +21,9 @@ export function useProperties(activeOnly = true) {
     setLoading(true)
     setError(null)
     const supabase = createClient()
-    let query = supabase.from('properties').select('id, code, name, billing_llc').order('code')
+    // Read from the curated payroll_property overlay (owner_llc -> billing_llc, property_id -> id)
+    // so pickers reflect manual corrections, not the AppFolio-synced `properties` table.
+    let query = supabase.from('payroll_property').select('id:property_id, code, name, billing_llc:owner_llc').order('code')
     if (activeOnly) query = query.eq('is_active', true)
     const { data, error: err } = await query
     if (err) setError(err.message)

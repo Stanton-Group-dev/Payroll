@@ -187,9 +187,9 @@ export const addTime: Operation<AddTimeInput, AddTimeResult> = {
 
     if (input.allocation.mode === 'property') {
       const { data: prop, error } = await ctx.supabase
-        .from('properties')
-        .select('id, code, name, is_active')
-        .eq('id', input.allocation.propertyId)
+        .from('payroll_property')
+        .select('code, name, is_active')
+        .eq('property_id', input.allocation.propertyId)
         .maybeSingle()
       if (error) throw new Error(`Failed to load property: ${error.message}`)
       if (!prop) blockers.push(`property ${input.allocation.propertyId} not found`)

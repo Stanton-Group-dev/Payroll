@@ -408,6 +408,31 @@ export interface Portfolio {
   include_in_invoicing?: boolean
 }
 
+/**
+ * payroll_property — the payroll app's curated, AppFolio-proof property record. A 1:1 overlay
+ * on `properties` keyed by `property_id` (= the shared properties.id). AppFolio only ever
+ * writes `properties`; payroll only ever trusts this table. `owner_llc` is the billing entity
+ * (replaces `properties.billing_llc`). See migration 20260618_02_payroll_property.sql and the
+ * curatedToProperty() mapper in lib/payroll/properties.ts. */
+export interface PayrollProperty {
+  id: string
+  property_id: string
+  appfolio_property_id: string | null
+  code: string | null
+  name: string | null
+  address: string | null
+  total_units: number | null
+  portfolio_id: string | null
+  owner_llc: string | null
+  include_in_invoicing: boolean
+  is_active: boolean
+  notes: string | null
+  created_at: string
+  updated_at: string
+  created_by: string | null
+  updated_by: string | null
+}
+
 export interface PayrollSpreadEvent {
   id: string
   payroll_week_id: string

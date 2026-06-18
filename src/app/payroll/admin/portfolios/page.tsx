@@ -110,7 +110,7 @@ export default function PortfoliosPage() {
     const supabase = createClient()
     const [portRes, propRes] = await Promise.all([
       supabase.from('portfolios').select('id, name, description, owner_llc, is_active, created_at').eq('is_active', true).order('name'),
-      supabase.from('properties').select('id, appfolio_property_id, code, name, address, total_units, portfolio_id, billing_llc, is_active').eq('is_active', true).order('code'),
+      supabase.from('payroll_property').select('id:property_id, appfolio_property_id, code, name, address, total_units, portfolio_id, billing_llc:owner_llc, is_active').eq('is_active', true).order('code'),
     ])
     const props = propRes.data ?? []
     setAllProperties(props)
@@ -197,6 +197,8 @@ export default function PortfoliosPage() {
         .update({ portfolio_id: portfolioId })
         .in('id', wizard.selectedPropertyIds)
       if (propErr) { setWizardError(propErr.message); setSaving(false); return }
+      // Mirror the portfolio assignment onto the curated overlay so grouping stays in sync.
+      await supabase.from('payroll_property').update({ portfolio_id: portfolioId }).in('property_id', wizard.selectedPropertyIds)
     }
 
     // Set portfolio-specific management fee if it differs from default
@@ -293,6 +295,10 @@ export default function PortfoliosPage() {
       setPropertySaving(false)
       return
     }
+
+    // Create the curated overlay row for the new property (insert-missing; seeds owner_llc
+    // from the billing LLC just entered). This is what invoicing actually reads.
+    await supabase.rpc('payroll_property_reconcile')
 
     setPropertyDrawerOpen(false)
     setPropertyForm(emptyPropertyForm())
