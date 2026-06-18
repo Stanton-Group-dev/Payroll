@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import {
   isNonBillableProperty,
@@ -32,6 +32,10 @@ export function usePayrollWeekReview(weekId: string) {
   const [mileageReimbursements, setMileageReimbursements] = useState<PayrollMileageReimbursement[]>([])
   const [heldEmployeeIds, setHeldEmployeeIds] = useState<Set<string>>(new Set())
   const [waivedEmployeeIds, setWaivedEmployeeIds] = useState<Set<string>>(new Set())
+  // Dept splits drive the per-department breakdown of the Administrative (spread) line.
+  type DeptSplitRow = { employee_id: string; department: string; allocation_pct: number; effective_date?: string }
+  const [defaultDeptSplits, setDefaultDeptSplits] = useState<DeptSplitRow[]>([])
+  const [deptSplitOverrides, setDeptSplitOverrides] = useState<DeptSplitRow[]>([])
   const [approved, setApproved] = useState(false)
   const [pendingCount, setPendingCount] = useState(0)
   const [unresolvedCount, setUnresolvedCount] = useState(0)
@@ -44,7 +48,7 @@ export function usePayrollWeekReview(weekId: string) {
     setLoading(true)
     setError(null)
     const supabase = createClient()
-    const [weekRes, empRes, entRes, adjRes, feeRes, propRes, portRes, approvalRes, ratesRes, mileageRes, holdsRes] = await Promise.all([
+    const [weekRes, empRes, entRes, adjRes, feeRes, propRes, portRes, approvalRes, ratesRes, mileageRes, holdsRes, splitRes, ovRes] = await Promise.all([
       supabase.from('payroll_weeks').select('*').eq('id', weekId).single(),
       supabase.from('payroll_employees').select('*').eq('is_active', true),
       supabase.from('payroll_time_entries').select('*').eq('payroll_week_id', weekId).eq('is_flagged', false).eq('is_active', true),
@@ -56,6 +60,8 @@ export function usePayrollWeekReview(weekId: string) {
       supabase.from('payroll_employee_rates').select('*'),
       supabase.from('payroll_mileage_reimbursements').select('*').eq('payroll_week_id', weekId),
       supabase.from('payroll_employee_holds').select('employee_id, status').eq('payroll_week_id', weekId).in('status', ['held', 'waived']),
+      supabase.from('payroll_employee_dept_splits').select('employee_id, department, allocation_pct, effective_date'),
+      supabase.from('payroll_dept_split_overrides').select('employee_id, department, allocation_pct').eq('payroll_week_id', weekId).eq('is_active', true),
     ])
     if (weekRes.error) { setError(weekRes.error.message); setLoading(false); return }
     setWeek(weekRes.data)
@@ -101,6 +107,8 @@ export function usePayrollWeekReview(weekId: string) {
     ))
     setEmployeeRates(ratesRes.data ?? [])
     setMileageReimbursements(mileageRes.data ?? [])
+    setDefaultDeptSplits((splitRes.data ?? []) as DeptSplitRow[])
+    setDeptSplitOverrides((ovRes.data ?? []) as DeptSplitRow[])
     setApproved((approvalRes.data?.length ?? 0) > 0)
     // Count the two kinds of open work that block timesheet/payroll approval:
     // pending (parked) entries, and unallocated entries (no property assigned yet).
@@ -127,6 +135,37 @@ export function usePayrollWeekReview(weekId: string) {
   }, [weekId])
 
   useEffect(() => { load() }, [load])
+
+  // Resolve each salaried employee's dept splits for this week: the week override
+  // wins; otherwise the most recent default-split set effective on or before the week.
+  // Fed to calculatePayroll to break the Administrative (spread) line out by department.
+  const salariedDeptSplits = useMemo(() => {
+    const map: Record<string, { department: string; pct: number }[]> = {}
+    const weekStart = week?.week_start
+    const ovByEmp: Record<string, DeptSplitRow[]> = {}
+    for (const o of deptSplitOverrides) (ovByEmp[o.employee_id] ??= []).push(o)
+    const defByEmp: Record<string, DeptSplitRow[]> = {}
+    for (const d of defaultDeptSplits) {
+      if (weekStart && d.effective_date && d.effective_date > weekStart) continue
+      ;(defByEmp[d.employee_id] ??= []).push(d)
+    }
+    for (const emp of employees) {
+      if (emp.type !== 'salaried') continue
+      const ov = ovByEmp[emp.id]
+      if (ov?.length) {
+        map[emp.id] = ov.map(o => ({ department: o.department, pct: Number(o.allocation_pct) }))
+        continue
+      }
+      const def = defByEmp[emp.id]
+      if (def?.length) {
+        const latest = def.reduce((m, d) => (d.effective_date && d.effective_date > m ? d.effective_date : m), '')
+        map[emp.id] = def
+          .filter(d => (d.effective_date ?? '') === latest)
+          .map(d => ({ department: d.department, pct: Number(d.allocation_pct) }))
+      }
+    }
+    return map
+  }, [deptSplitOverrides, defaultDeptSplits, employees, week?.week_start])
 
   // Approve the timesheet: draft → corrections_complete. This is the gate the
   // review page waits on before payroll can be calculated. Re-checks blockers
@@ -192,6 +231,7 @@ export function usePayrollWeekReview(weekId: string) {
   return {
     week, employees, entries, adjustments, feeConfigs, properties, employeeRates,
     mileageReimbursements, excludedPropertyIds, heldEmployeeIds, waivedEmployeeIds,
+    salariedDeptSplits,
     approved, pendingCount, unresolvedCount, loading, error, approving, approvingTimesheet,
     approvePayroll, approveTimesheet, refetch: load,
   }

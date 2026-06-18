@@ -4,7 +4,7 @@ import { useMemo, useState, use, type ReactNode } from 'react'
 import { DollarSign, Lock, CheckCircle2 } from 'lucide-react'
 import { usePayrollWeekReview } from '@/hooks/payroll/usePayrollWeekReview'
 import { PageHeader, FormButton, InfoBlock, StatusBadge } from '@/components/form'
-import { calculatePayroll, resolveRateAsOf, formatCurrency, type EmployeePaySummary } from '@/lib/payroll/calculations'
+import { calculatePayroll, resolveRateAsOf, formatCurrency, SPREAD_OTHER_DEPT, type EmployeePaySummary } from '@/lib/payroll/calculations'
 import { PayrollComparisonPanel } from '@/components/payroll/PayrollComparisonPanel'
 import { ManualReconcilePanel } from '@/components/payroll/ManualReconcilePanel'
 import { UnallocatedHoldsPanel } from '@/components/payroll/UnallocatedHoldsPanel'
@@ -40,7 +40,7 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
   const { weekId } = use(params)
   const {
     week, employees, entries, adjustments, feeConfigs, properties, employeeRates,
-    mileageReimbursements, excludedPropertyIds,
+    mileageReimbursements, excludedPropertyIds, salariedDeptSplits,
     approved, pendingCount, unresolvedCount, loading, approving, approvingTimesheet,
     approvePayroll, approveTimesheet, refetch,
   } = usePayrollWeekReview(weekId)
@@ -60,8 +60,8 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
       ...emp,
       hourly_rate: resolveRateAsOf(emp.id, weekStart, employeeRates, emp.hourly_rate ?? 0),
     }))
-    return calculatePayroll(employeesWithHistoricalRates, entries, adjustments, feeConfigs, properties, mileageReimbursements)
-  }, [employees, employeeRates, week, entries, adjustments, feeConfigs, properties, mileageReimbursements])
+    return calculatePayroll(employeesWithHistoricalRates, entries, adjustments, feeConfigs, properties, mileageReimbursements, salariedDeptSplits)
+  }, [employees, employeeRates, week, entries, adjustments, feeConfigs, properties, mileageReimbursements, salariedDeptSplits])
 
   const [empSort, setEmpSort] = useState<{ key: keyof EmployeePaySummary; dir: 'asc' | 'desc' } | null>(null)
   const toggleEmpSort = (key: keyof EmployeePaySummary) =>
@@ -95,6 +95,21 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
     [billableCosts, excludedPropertyIds],
   )
   const excludedCostCount = billableCosts.length - includedCosts.length
+
+  // Week-wide Administrative (spread) cost broken out by department — the same mix
+  // each property bears its unit-weighted share of. Summed over billable properties.
+  const spreadByDept = useMemo(() => {
+    const totals: Record<string, number> = {}
+    for (const pc of includedCosts) {
+      for (const d of pc.spread_by_dept) totals[d.department] = (totals[d.department] ?? 0) + d.amount
+    }
+    return Object.entries(totals)
+      .map(([department, amount]) => ({ department, amount: Math.round(amount * 100) / 100 }))
+      .filter(d => Math.abs(d.amount) > 0.005)
+      .sort((a, b) => b.amount - a.amount)
+  }, [includedCosts])
+  const hasDeptSplit = spreadByDept.some(d => d.department !== SPREAD_OTHER_DEPT)
+  const totalSpread = spreadByDept.reduce((s, d) => s + d.amount, 0)
 
   const timesheetApproved = week?.status !== 'draft'
   const canApprovePayroll = timesheetApproved && !approved && result !== null && pendingCount === 0
@@ -290,6 +305,50 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
                 </p>
               )}
             </div>
+
+            {/* Administrative (spread) by department */}
+            {hasDeptSplit && (
+              <div>
+                <h3 className="font-serif text-base text-[var(--primary)] mb-2">Administrative &amp; Supervisory — by Department</h3>
+                <p className="text-xs text-[var(--muted)] mb-3 max-w-2xl">
+                  Salaried pay attributed by each employee&apos;s dept split; overhead labor and phone/tool
+                  reimbursements fall in &ldquo;Other.&rdquo; This is the week-wide pool — every property bears its
+                  unit-weighted share of this same mix, and these sub-lines appear under each property&apos;s
+                  Administrative line on the statement &amp; invoices.
+                </p>
+                <div className="border border-[var(--border)] overflow-auto max-w-md">
+                  <table className="w-full text-sm border-collapse">
+                    <thead>
+                      <tr className="bg-[var(--primary)] text-white text-xs">
+                        <th className="px-3 py-2.5 text-left font-medium">Department</th>
+                        <th className="px-3 py-2.5 text-right font-medium">Amount</th>
+                        <th className="px-3 py-2.5 text-right font-medium">Share</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {spreadByDept.map((d, i) => (
+                        <tr key={d.department} className={`border-b border-[var(--divider)] ${i % 2 === 0 ? 'bg-white' : 'bg-[var(--bg-section)]'}`}>
+                          <td className="px-3 py-2">
+                            {d.department === SPREAD_OTHER_DEPT ? 'Other (overhead, phone/tools)' : d.department}
+                          </td>
+                          <td className="px-3 py-2 text-right">{formatCurrency(d.amount)}</td>
+                          <td className="px-3 py-2 text-right text-[var(--muted)]">
+                            {totalSpread > 0 ? `${Math.round((d.amount / totalSpread) * 100)}%` : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-[var(--bg-section)] font-semibold border-t border-[var(--divider)]">
+                        <td className="px-3 py-2.5">Total Administrative</td>
+                        <td className="px-3 py-2.5 text-right">{formatCurrency(totalSpread)}</td>
+                        <td className="px-3 py-2.5" />
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            )}
 
             {/* Approve */}
             {canApprovePayroll && (

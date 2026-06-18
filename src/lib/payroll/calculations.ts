@@ -73,7 +73,17 @@ export interface PropertyCostSummary {
   mgmt_fee: number
   total_cost: number
   cost_per_unit: number
+  /** Department breakdown of spread_cost. The salaried-pay portion is attributed to
+   *  departments via each salaried employee's dept splits; overhead labor and
+   *  phone/tool reimbursements land in an 'Other' bucket. Sums to spread_cost.
+   *  Display-only (customer-facing billing) — does not affect any total. Empty when
+   *  no dept splits are supplied. */
+  spread_by_dept: { department: string; amount: number }[]
 }
+
+/** Catch-all bucket for spread dollars not attributable to a department —
+ *  overhead labor, phone/tool reimbursements, and salaried pay with no split set. */
+export const SPREAD_OTHER_DEPT = 'Other'
 
 export interface PayrollCalculationResult {
   employee_summaries: EmployeePaySummary[]
@@ -126,7 +136,12 @@ export function calculatePayroll(
   adjustments: PayrollAdjustment[],
   mgmtFeeConfigs: PayrollManagementFeeConfig[],
   properties: Property[],
-  mileageReimbursements: PayrollMileageReimbursement[] = []
+  mileageReimbursements: PayrollMileageReimbursement[] = [],
+  /** Resolved department splits for salaried employees, keyed by employee id —
+   *  week override if set, else default splits. Each list's pct values are weights
+   *  (normalized internally, so 0–1 fractions or 0–100 both work). Drives the
+   *  per-department breakdown of spread_cost; omit for no breakdown. */
+  salariedDeptSplits: Record<string, { department: string; pct: number }[]> = {}
 ): PayrollCalculationResult {
   const employeeMap = Object.fromEntries(employees.map(e => [e.id, e]))
   const propertyMap = Object.fromEntries(properties.map(p => [p.id, p]))
@@ -328,6 +343,49 @@ export function calculatePayroll(
     }, 0)
   const spreadTotal = adjustmentSpread + salariedSpread + overheadSpread
 
+  // Department breakdown of the spread pool (display-only, customer billing).
+  // Only the salaried-pay portion is attributed to departments — via each salaried
+  // employee's resolved dept splits. Overhead labor, phone/tool reimbursements, and
+  // any salaried pay with no split set fall into the 'Other' bucket. The per-department
+  // dollars sum to spreadTotal, so each property's spread_cost splits by the same mix.
+  const spreadDeptDollars: Record<string, number> = {}
+  for (const emp of employees) {
+    if (emp.type !== 'salaried' || !emp.weekly_rate) continue
+    const pay = Number(emp.weekly_rate)
+    const splits = salariedDeptSplits[emp.id]
+    const totalPct = splits?.reduce((s, r) => s + r.pct, 0) ?? 0
+    if (splits && splits.length > 0 && totalPct > 0) {
+      for (const r of splits) {
+        spreadDeptDollars[r.department] = (spreadDeptDollars[r.department] ?? 0) + pay * (r.pct / totalPct)
+      }
+    } else {
+      spreadDeptDollars[SPREAD_OTHER_DEPT] = (spreadDeptDollars[SPREAD_OTHER_DEPT] ?? 0) + pay
+    }
+  }
+  if (overheadSpread + adjustmentSpread !== 0) {
+    spreadDeptDollars[SPREAD_OTHER_DEPT] = (spreadDeptDollars[SPREAD_OTHER_DEPT] ?? 0) + overheadSpread + adjustmentSpread
+  }
+  // Ordered department weights (biggest first); 'Other' is allowed but kept distinct.
+  const spreadDeptWeights = Object.entries(spreadDeptDollars)
+    .filter(([, amt]) => Math.abs(amt) > 0.005)
+    .sort((a, b) => b[1] - a[1])
+
+  // Split a single property's spread_cost across departments by the pool's mix,
+  // absorbing any rounding remainder into the largest department so the sub-lines
+  // sum exactly to spread_cost.
+  function splitSpreadByDept(spread: number): { department: string; amount: number }[] {
+    if (spreadTotal === 0 || spreadDeptWeights.length === 0 || spread === 0) return []
+    let acc = 0
+    const parts = spreadDeptWeights.map(([department, amt]) => {
+      const v = round2(spread * (amt / spreadTotal))
+      acc += v
+      return { department, amount: v }
+    })
+    const diff = round2(spread - acc)
+    if (diff !== 0) parts[0].amount = round2(parts[0].amount + diff)
+    return parts
+  }
+
   // Spread only across BILLABLE properties — never onto non-billable / admin / test /
   // stale rows (include_in_invoicing = false), so the full salaried cost lands on real
   // LLCs and nothing leaks onto "Stanton Management" placeholders.
@@ -401,6 +459,7 @@ export function calculatePayroll(
       mgmt_fee: round2(mgmt_fee),
       total_cost: round2(total_cost),
       cost_per_unit: prop.total_units ? round2(total_cost / prop.total_units) : 0,
+      spread_by_dept: splitSpreadByDept(round2(spread)),
     })
   }
 

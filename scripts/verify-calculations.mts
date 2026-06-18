@@ -341,6 +341,56 @@ console.log('\n== 9b. Overhead-spread labor (e.g. "Office"): PAID, billed by uni
   check('P2 spread 195 (30/40 of 260)', near(p2.spread_cost, 195), `${p2.spread_cost}`)
 }
 
+console.log('\n== 9c. Administrative (spread) broken down by department ==')
+{
+  // Salaried S @ $150/wk, split 50% Acquisitions / 50% Maintenance.
+  // No hourly direct labor, no overhead/adjustments → spread pool = 150 (all salaried).
+  // P1 10 units, P2 30 units → 40 total.
+  //   P1 spread = 10/40*150 = 37.50 ; P2 spread = 30/40*150 = 112.50
+  // Each property's spread splits by the same 50/50 mix:
+  //   P1: Acquisitions 18.75, Maintenance 18.75
+  //   P2: Acquisitions 56.25, Maintenance 56.25
+  const P1 = prop({ id: 'P1', code: 'P1', total_units: 10 })
+  const P2 = prop({ id: 'P2', code: 'P2', total_units: 30 })
+  const r = calculatePayroll(
+    [emp({ id: 'S', name: 'Sa', type: 'salaried', weekly_rate: 150 })],
+    [], [], NO_FEES, [P1, P2], [],
+    { S: [{ department: 'Acquisitions', pct: 0.5 }, { department: 'Maintenance', pct: 0.5 }] },
+  )
+  const p1 = r.property_costs.find((p) => p.property_id === 'P1')!
+  const p2 = r.property_costs.find((p) => p.property_id === 'P2')!
+  const acq1 = p1.spread_by_dept.find((d) => d.department === 'Acquisitions')!
+  const mnt1 = p1.spread_by_dept.find((d) => d.department === 'Maintenance')!
+  check('P1 spread 37.50', near(p1.spread_cost, 37.5), `${p1.spread_cost}`)
+  check('P1 Acquisitions 18.75', near(acq1.amount, 18.75), `${acq1.amount}`)
+  check('P1 Maintenance 18.75', near(mnt1.amount, 18.75), `${mnt1.amount}`)
+  check('P1 sub-lines sum to spread', near(p1.spread_by_dept.reduce((s, d) => s + d.amount, 0), p1.spread_cost))
+  const acq2 = p2.spread_by_dept.find((d) => d.department === 'Acquisitions')!
+  check('P2 Acquisitions 56.25', near(acq2.amount, 56.25), `${acq2.amount}`)
+  check('no Other bucket (fully split)', !p2.spread_by_dept.some((d) => d.department === 'Other'))
+}
+
+console.log('\n== 9d. Unsplit salaried + overhead fall into Other ==')
+{
+  // Salaried S @ $100/wk with NO split, plus overhead labor O: 10 reg @ $20 = 200.
+  // spread pool = 100 (salaried) + 200 (overhead) = 300, all → 'Other'.
+  // Single property P1 bears the whole 300.
+  const P1 = prop({ id: 'P1', code: 'P1', total_units: 10 })
+  const r = calculatePayroll(
+    [
+      emp({ id: 'S', name: 'Sa', type: 'salaried', weekly_rate: 100 }),
+      emp({ id: 'O', name: 'Of', type: 'hourly', hourly_rate: 20 }),
+    ],
+    [entry({ employee_id: 'O', regular_hours: 10, property_id: null, is_overhead_spread: true })],
+    [], NO_FEES, [P1], [],
+    {}, // no splits supplied
+  )
+  const p1 = r.property_costs.find((p) => p.property_id === 'P1')!
+  check('P1 spread 300', near(p1.spread_cost, 300), `${p1.spread_cost}`)
+  check('one bucket, all Other', p1.spread_by_dept.length === 1 && p1.spread_by_dept[0].department === 'Other')
+  check('Other amount 300', near(p1.spread_by_dept[0].amount, 300), `${p1.spread_by_dept[0]?.amount}`)
+}
+
 console.log('\n== 10. config constants are what the math assumes ==')
 {
   check('PAYROLL_TAX_RATE = 0.08', PAYROLL_TAX_RATE === 0.08, `${PAYROLL_TAX_RATE}`)
