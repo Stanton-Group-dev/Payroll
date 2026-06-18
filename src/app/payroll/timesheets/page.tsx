@@ -72,12 +72,17 @@ function TimesheetsPageContent() {
     setDrawerDirty(false)
   }, [selectedEmployeeId])
 
-  // Auto-select first employee once entries load
+  // Auto-select once entries load. Prefer the first employee with something to
+  // resolve (unresolved blocks first, then pending) so the user lands on a problem
+  // instead of whoever happens to be alphabetically first; fall back to the first.
   useEffect(() => {
-    if (!selectedEmployeeId && employees.length > 0 && selectedWeekId) {
-      setSelectedEmployeeId(employees[0].id)
-    }
-  }, [employees, selectedWeekId, selectedEmployeeId])
+    if (selectedEmployeeId || employees.length === 0 || !selectedWeekId || loading) return
+    const needsAttention = (emp: PayrollEmployee, predicate: (e: PayrollTimeEntry) => boolean) =>
+      allEntries.some(e => e.employee_id === emp.id && predicate(e))
+    const firstUnresolved = employees.find(emp => needsAttention(emp, e => !e.property_id && !e.pending_resolution))
+    const firstPending = employees.find(emp => needsAttention(emp, e => !!e.pending_resolution))
+    setSelectedEmployeeId((firstUnresolved ?? firstPending ?? employees[0]).id)
+  }, [employees, allEntries, selectedWeekId, selectedEmployeeId, loading])
 
   // Entries for the selected employee
   const employeeEntries = useMemo(() =>
