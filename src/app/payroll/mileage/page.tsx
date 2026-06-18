@@ -173,6 +173,7 @@ function MileageTableRow({
   const initialMiles = row.record?.miles_approved ?? row.milesRaw
   const [miles, setMiles] = useState<string>(String(initialMiles))
   const [busy, setBusy] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   // Keep the input in sync when the underlying record/raw miles change (e.g. after save/refetch).
   useEffect(() => {
@@ -186,6 +187,7 @@ function MileageTableRow({
 
   const save = async (newStatus: MileageStatus) => {
     setBusy(true)
+    setSaveError(null)
     try {
       await onSave({
         employeeId: row.employee.id,
@@ -194,6 +196,8 @@ function MileageTableRow({
         status: newStatus,
         notes: row.record?.notes ?? null,
       })
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : 'Save failed')
     } finally {
       setBusy(false)
     }
@@ -243,6 +247,7 @@ function MileageTableRow({
             </button>
           )}
         </div>
+        {saveError && <p className="mt-1 text-right text-xs text-[var(--error)]">{saveError}</p>}
       </td>
     </tr>
   )
