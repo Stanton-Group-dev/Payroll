@@ -1,13 +1,39 @@
 'use client'
 
-import { useMemo } from 'react'
-import { use } from 'react'
+import { useMemo, useState, use, type ReactNode } from 'react'
 import { DollarSign, Lock } from 'lucide-react'
 import { usePayrollWeekReview } from '@/hooks/payroll/usePayrollWeekReview'
 import { PageHeader, FormButton, InfoBlock, StatusBadge } from '@/components/form'
-import { calculatePayroll, resolveRateAsOf, formatCurrency } from '@/lib/payroll/calculations'
+import { calculatePayroll, resolveRateAsOf, formatCurrency, type EmployeePaySummary } from '@/lib/payroll/calculations'
 import { PayrollComparisonPanel } from '@/components/payroll/PayrollComparisonPanel'
 import { ManualReconcilePanel } from '@/components/payroll/ManualReconcilePanel'
+
+type EmpCol = {
+  key: keyof EmployeePaySummary
+  label: string
+  align: 'left' | 'right'
+  numeric: boolean
+  /** bold the header (e.g. Gross Pay / Total Billable) */
+  bold?: boolean
+  tdClass?: string
+  render: (e: EmployeePaySummary) => ReactNode
+}
+
+const EMP_COLS: EmpCol[] = [
+  { key: 'employee_name', label: 'Employee', align: 'left', numeric: false, tdClass: 'font-medium', render: e => e.employee_name },
+  { key: 'regular_hours', label: 'Reg Hrs', align: 'right', numeric: true, render: e => e.regular_hours || '—' },
+  { key: 'ot_hours', label: 'OT Hrs', align: 'right', numeric: true, render: e => e.ot_hours || '—' },
+  { key: 'regular_wages', label: 'Reg Wages', align: 'right', numeric: true, render: e => formatCurrency(e.regular_wages) },
+  { key: 'ot_wages', label: 'OT Wages', align: 'right', numeric: true, render: e => (e.ot_wages ? formatCurrency(e.ot_wages) : '—') },
+  { key: 'phone_reimbursement', label: 'Phone', align: 'right', numeric: true, render: e => (e.phone_reimbursement ? formatCurrency(e.phone_reimbursement) : '—') },
+  { key: 'mileage_reimbursement', label: 'Mileage', align: 'right', numeric: true, render: e => (e.mileage_reimbursement ? formatCurrency(e.mileage_reimbursement) : '—') },
+  { key: 'advances', label: 'Advances', align: 'right', numeric: true, tdClass: 'text-[var(--error)]', render: e => (e.advances ? `−${formatCurrency(e.advances)}` : '—') },
+  { key: 'gross_pay', label: 'Gross Pay', align: 'right', numeric: true, bold: true, tdClass: 'font-semibold', render: e => formatCurrency(e.gross_pay) },
+  { key: 'payroll_tax', label: 'Tax (8%)', align: 'right', numeric: true, tdClass: 'text-[var(--muted)]', render: e => (e.payroll_tax ? formatCurrency(e.payroll_tax) : '—') },
+  { key: 'workers_comp', label: 'WC (3%)', align: 'right', numeric: true, tdClass: 'text-[var(--muted)]', render: e => (e.workers_comp ? formatCurrency(e.workers_comp) : '—') },
+  { key: 'management_fee', label: 'Mgmt Fee', align: 'right', numeric: true, tdClass: 'text-[var(--muted)]', render: e => formatCurrency(e.management_fee) },
+  { key: 'total_billable', label: 'Total Billable', align: 'right', numeric: true, bold: true, tdClass: 'font-semibold text-[var(--primary)]', render: e => formatCurrency(e.total_billable) },
+]
 
 export default function WeekReviewPage({ params }: { params: Promise<{ weekId: string }> }) {
   const { weekId } = use(params)
@@ -26,6 +52,24 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
     }))
     return calculatePayroll(employeesWithHistoricalRates, entries, adjustments, feeConfigs, properties, mileageReimbursements)
   }, [employees, employeeRates, week, entries, adjustments, feeConfigs, properties, mileageReimbursements])
+
+  const [empSort, setEmpSort] = useState<{ key: keyof EmployeePaySummary; dir: 'asc' | 'desc' } | null>(null)
+  const toggleEmpSort = (key: keyof EmployeePaySummary) =>
+    setEmpSort(prev =>
+      prev?.key === key
+        ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+        : { key, dir: EMP_COLS.find(c => c.key === key)?.numeric ? 'desc' : 'asc' })
+
+  const empRows = useMemo(() => {
+    const rows = (result?.employee_summaries ?? []).filter(e => e.gross_pay !== 0 || e.regular_hours > 0)
+    if (!empSort) return rows
+    const numeric = EMP_COLS.find(c => c.key === empSort.key)?.numeric ?? true
+    const dir = empSort.dir === 'asc' ? 1 : -1
+    return [...rows].sort((a, b) => {
+      const av = a[empSort.key], bv = b[empSort.key]
+      return numeric ? dir * (Number(av) - Number(bv)) : dir * String(av).localeCompare(String(bv))
+    })
+  }, [result, empSort])
 
   const timesheetApproved = week?.status !== 'draft'
   const canApprovePayroll = timesheetApproved && !approved && result !== null && pendingCount === 0
@@ -114,39 +158,29 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
                 <table className="w-full text-sm border-collapse">
                   <thead>
                     <tr className="bg-[var(--primary)] text-white text-xs">
-                      <th className="px-3 py-2.5 text-left font-medium">Employee</th>
-                      <th className="px-3 py-2.5 text-right font-medium">Reg Hrs</th>
-                      <th className="px-3 py-2.5 text-right font-medium">OT Hrs</th>
-                      <th className="px-3 py-2.5 text-right font-medium">Reg Wages</th>
-                      <th className="px-3 py-2.5 text-right font-medium">OT Wages</th>
-                      <th className="px-3 py-2.5 text-right font-medium">Phone</th>
-                      <th className="px-3 py-2.5 text-right font-medium">Mileage</th>
-                      <th className="px-3 py-2.5 text-right font-medium">Advances</th>
-                      <th className="px-3 py-2.5 text-right font-medium font-bold">Gross Pay</th>
-                      <th className="px-3 py-2.5 text-right font-medium">Tax (8%)</th>
-                      <th className="px-3 py-2.5 text-right font-medium">WC (3%)</th>
-                      <th className="px-3 py-2.5 text-right font-medium">Mgmt Fee</th>
-                      <th className="px-3 py-2.5 text-right font-medium font-bold">Total Billable</th>
+                      {EMP_COLS.map(col => (
+                        <th
+                          key={col.key}
+                          onClick={() => toggleEmpSort(col.key)}
+                          title="Click to sort"
+                          className={`px-3 py-2.5 font-medium cursor-pointer select-none hover:bg-white/10 ${col.align === 'left' ? 'text-left' : 'text-right'} ${col.bold ? 'font-bold' : ''}`}
+                        >
+                          <span className="inline-flex items-center gap-1">
+                            {col.label}
+                            <span className="w-2 text-white/60">{empSort?.key === col.key ? (empSort.dir === 'asc' ? '▲' : '▼') : ''}</span>
+                          </span>
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {result.employee_summaries
-                      .filter(e => e.gross_pay !== 0 || e.regular_hours > 0)
-                      .map((emp, i) => (
+                    {empRows.map((emp, i) => (
                       <tr key={emp.employee_id} className={`border-b border-[var(--divider)] ${i % 2 === 0 ? 'bg-white' : 'bg-[var(--bg-section)]'}`}>
-                        <td className="px-3 py-2 font-medium">{emp.employee_name}</td>
-                        <td className="px-3 py-2 text-right">{emp.regular_hours || '—'}</td>
-                        <td className="px-3 py-2 text-right">{emp.ot_hours || '—'}</td>
-                        <td className="px-3 py-2 text-right">{formatCurrency(emp.regular_wages)}</td>
-                        <td className="px-3 py-2 text-right">{emp.ot_wages ? formatCurrency(emp.ot_wages) : '—'}</td>
-                        <td className="px-3 py-2 text-right">{emp.phone_reimbursement ? formatCurrency(emp.phone_reimbursement) : '—'}</td>
-                        <td className="px-3 py-2 text-right">{emp.mileage_reimbursement ? formatCurrency(emp.mileage_reimbursement) : '—'}</td>
-                        <td className="px-3 py-2 text-right text-[var(--error)]">{emp.advances ? `−${formatCurrency(emp.advances)}` : '—'}</td>
-                        <td className="px-3 py-2 text-right font-semibold">{formatCurrency(emp.gross_pay)}</td>
-                        <td className="px-3 py-2 text-right text-[var(--muted)]">{emp.payroll_tax ? formatCurrency(emp.payroll_tax) : '—'}</td>
-                        <td className="px-3 py-2 text-right text-[var(--muted)]">{emp.workers_comp ? formatCurrency(emp.workers_comp) : '—'}</td>
-                        <td className="px-3 py-2 text-right text-[var(--muted)]">{formatCurrency(emp.management_fee)}</td>
-                        <td className="px-3 py-2 text-right font-semibold text-[var(--primary)]">{formatCurrency(emp.total_billable)}</td>
+                        {EMP_COLS.map(col => (
+                          <td key={col.key} className={`px-3 py-2 ${col.align === 'left' ? '' : 'text-right'} ${col.tdClass ?? ''}`}>
+                            {col.render(emp)}
+                          </td>
+                        ))}
                       </tr>
                     ))}
                   </tbody>

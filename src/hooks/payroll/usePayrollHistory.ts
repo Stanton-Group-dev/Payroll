@@ -82,7 +82,7 @@ export function useEmployeePayHistory() {
         .eq('is_active', true)
         .in('payroll_week_id', weekIds),
       supabase.from('payroll_employees')
-        .select('hourly_rate, weekly_rate, type')
+        .select('hourly_rate, weekly_rate, type, department')
         .eq('id', employeeId)
         .single(),
     ])
@@ -109,7 +109,7 @@ export function useEmployeePayHistory() {
       row.ot_hours += entry.ot_hours ?? 0
       row.pto_hours += entry.pto_hours ?? 0
       const rate = emp?.hourly_rate ?? 0
-      row.gross_pay += (entry.regular_hours ?? 0) * rate + (entry.ot_hours ?? 0) * rate * otMultiplier(emp?.type ?? 'hourly')
+      row.gross_pay += (entry.regular_hours ?? 0) * rate + (entry.ot_hours ?? 0) * rate * otMultiplier(emp?.type ?? 'hourly', emp?.department)
     }
 
     if (emp?.type === 'salaried' && emp.weekly_rate) {
