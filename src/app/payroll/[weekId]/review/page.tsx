@@ -7,6 +7,7 @@ import { PageHeader, FormButton, InfoBlock, StatusBadge } from '@/components/for
 import { calculatePayroll, resolveRateAsOf, formatCurrency, type EmployeePaySummary } from '@/lib/payroll/calculations'
 import { PayrollComparisonPanel } from '@/components/payroll/PayrollComparisonPanel'
 import { ManualReconcilePanel } from '@/components/payroll/ManualReconcilePanel'
+import { UnallocatedHoldsPanel } from '@/components/payroll/UnallocatedHoldsPanel'
 
 type EmpCol = {
   key: keyof EmployeePaySummary
@@ -40,7 +41,7 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
   const {
     week, employees, entries, adjustments, feeConfigs, properties, employeeRates,
     mileageReimbursements, excludedPropertyIds,
-    approved, pendingCount, loading, approving, approvePayroll,
+    approved, pendingCount, loading, approving, approvePayroll, refetch,
   } = usePayrollWeekReview(weekId)
 
   const result = useMemo(() => {
@@ -139,6 +140,10 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
               </a>
             </div>
           </InfoBlock>
+        )}
+
+        {timesheetApproved && !approved && (
+          <UnallocatedHoldsPanel weekId={weekId} onChange={refetch} />
         )}
 
         {result && (

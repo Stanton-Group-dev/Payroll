@@ -24,6 +24,7 @@ export function usePayrollWeekReview(weekId: string) {
   const [excludedPropertyIds, setExcludedPropertyIds] = useState<Set<string>>(new Set())
   const [employeeRates, setEmployeeRates] = useState<PayrollEmployeeRate[]>([])
   const [mileageReimbursements, setMileageReimbursements] = useState<PayrollMileageReimbursement[]>([])
+  const [heldEmployeeIds, setHeldEmployeeIds] = useState<Set<string>>(new Set())
   const [approved, setApproved] = useState(false)
   const [pendingCount, setPendingCount] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -34,7 +35,7 @@ export function usePayrollWeekReview(weekId: string) {
     setLoading(true)
     setError(null)
     const supabase = createClient()
-    const [weekRes, empRes, entRes, adjRes, feeRes, propRes, portRes, approvalRes, ratesRes, mileageRes] = await Promise.all([
+    const [weekRes, empRes, entRes, adjRes, feeRes, propRes, portRes, approvalRes, ratesRes, mileageRes, holdsRes] = await Promise.all([
       supabase.from('payroll_weeks').select('*').eq('id', weekId).single(),
       supabase.from('payroll_employees').select('*').eq('is_active', true),
       supabase.from('payroll_time_entries').select('*').eq('payroll_week_id', weekId).eq('is_flagged', false).eq('is_active', true),
@@ -45,10 +46,16 @@ export function usePayrollWeekReview(weekId: string) {
       supabase.from('payroll_approvals').select('*').eq('payroll_week_id', weekId).eq('stage', 'payroll'),
       supabase.from('payroll_employee_rates').select('*'),
       supabase.from('payroll_mileage_reimbursements').select('*').eq('payroll_week_id', weekId),
+      supabase.from('payroll_employee_holds').select('employee_id').eq('payroll_week_id', weekId).eq('status', 'held'),
     ])
     if (weekRes.error) { setError(weekRes.error.message); setLoading(false); return }
     setWeek(weekRes.data)
-    setEmployees(empRes.data ?? [])
+    // Held employees are pulled from the run entirely — excluded here so the calc
+    // drops both their pay and their property labor cost (you can't bill labor you
+    // didn't pay). They reappear once their hold is released.
+    const held = new Set((holdsRes.data ?? []).map(h => h.employee_id))
+    setHeldEmployeeIds(held)
+    setEmployees((empRes.data ?? []).filter(e => !held.has(e.id)))
     setEntries(entRes.data ?? [])
     setAdjustments(adjRes.data ?? [])
     setFeeConfigs(feeRes.data ?? [])
@@ -114,7 +121,7 @@ export function usePayrollWeekReview(weekId: string) {
 
   return {
     week, employees, entries, adjustments, feeConfigs, properties, employeeRates,
-    mileageReimbursements, excludedPropertyIds,
+    mileageReimbursements, excludedPropertyIds, heldEmployeeIds,
     approved, pendingCount, loading, error, approving,
     approvePayroll, refetch: load,
   }
