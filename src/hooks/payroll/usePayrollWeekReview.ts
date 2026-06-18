@@ -28,9 +28,11 @@ export function usePayrollWeekReview(weekId: string) {
   const [waivedEmployeeIds, setWaivedEmployeeIds] = useState<Set<string>>(new Set())
   const [approved, setApproved] = useState(false)
   const [pendingCount, setPendingCount] = useState(0)
+  const [unresolvedCount, setUnresolvedCount] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [approving, setApproving] = useState(false)
+  const [approvingTimesheet, setApprovingTimesheet] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -57,7 +59,9 @@ export function usePayrollWeekReview(weekId: string) {
     const holdRows = holdsRes.data ?? []
     const held = new Set(holdRows.filter(h => h.status === 'held').map(h => h.employee_id))
     // Waived employees stay in the run (paid for allocated work) but their unallocated
-    // (no-property) hours are dropped below so they're neither paid nor billed.
+    // (no-property) hours are written off. The waive deactivates those entries, so the
+    // is_active filter above already drops them; this set is a backstop that keeps them
+    // out of pay even if a Workyard re-sync reactivates an entry while the waive stands.
     const waived = new Set(holdRows.filter(h => h.status === 'waived').map(h => h.employee_id))
     setHeldEmployeeIds(held)
     setWaivedEmployeeIds(waived)
@@ -88,18 +92,57 @@ export function usePayrollWeekReview(weekId: string) {
     setEmployeeRates(ratesRes.data ?? [])
     setMileageReimbursements(mileageRes.data ?? [])
     setApproved((approvalRes.data?.length ?? 0) > 0)
-    // Count pending entries that block approval
-    const pendingRes = await supabase
-      .from('payroll_time_entries')
-      .select('id', { count: 'exact', head: true })
-      .eq('payroll_week_id', weekId)
-      .eq('pending_resolution', true)
-      .eq('is_active', true)
+    // Count the two kinds of open work that block timesheet/payroll approval:
+    // pending (parked) entries, and unallocated entries (no property assigned yet).
+    const [pendingRes, unresolvedRes] = await Promise.all([
+      supabase
+        .from('payroll_time_entries')
+        .select('id', { count: 'exact', head: true })
+        .eq('payroll_week_id', weekId)
+        .eq('pending_resolution', true)
+        .eq('is_active', true),
+      supabase
+        .from('payroll_time_entries')
+        .select('id', { count: 'exact', head: true })
+        .eq('payroll_week_id', weekId)
+        .is('property_id', null)
+        .eq('is_active', true),
+    ])
     setPendingCount(pendingRes.count ?? 0)
+    setUnresolvedCount(unresolvedRes.count ?? 0)
     setLoading(false)
   }, [weekId])
 
   useEffect(() => { load() }, [load])
+
+  // Approve the timesheet: draft → corrections_complete. This is the gate the
+  // review page waits on before payroll can be calculated. Re-checks blockers
+  // against the DB so a week with open work can never be approved, even on stale
+  // local state, and only advances a week that is still in draft.
+  const approveTimesheet = useCallback(async () => {
+    setApprovingTimesheet(true)
+    try {
+      const supabase = createClient()
+      const [{ count: unresolved }, { count: pending }] = await Promise.all([
+        supabase.from('payroll_time_entries').select('id', { count: 'exact', head: true })
+          .eq('payroll_week_id', weekId).is('property_id', null).eq('is_active', true),
+        supabase.from('payroll_time_entries').select('id', { count: 'exact', head: true })
+          .eq('payroll_week_id', weekId).eq('pending_resolution', true).eq('is_active', true),
+      ])
+      if ((unresolved ?? 0) > 0 || (pending ?? 0) > 0) {
+        throw new Error(`Resolve all entries first — ${unresolved ?? 0} unallocated, ${pending ?? 0} pending.`)
+      }
+      const { error: updErr } = await supabase
+        .from('payroll_weeks')
+        .update({ status: 'corrections_complete' })
+        .eq('id', weekId)
+        .eq('status', 'draft')
+      if (updErr) throw new Error(updErr.message)
+      await load()
+    } finally {
+      setApprovingTimesheet(false)
+    }
+  }, [weekId, load])
 
   const approvePayroll = useCallback(async (result: PayrollCalculationResult) => {
     if (pendingCount > 0) throw new Error(`${pendingCount} entries are still pending — resolve or discard before approving.`)
@@ -135,7 +178,7 @@ export function usePayrollWeekReview(weekId: string) {
   return {
     week, employees, entries, adjustments, feeConfigs, properties, employeeRates,
     mileageReimbursements, excludedPropertyIds, heldEmployeeIds, waivedEmployeeIds,
-    approved, pendingCount, loading, error, approving,
-    approvePayroll, refetch: load,
+    approved, pendingCount, unresolvedCount, loading, error, approving, approvingTimesheet,
+    approvePayroll, approveTimesheet, refetch: load,
   }
 }

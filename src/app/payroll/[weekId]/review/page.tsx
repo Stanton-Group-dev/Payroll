@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState, use, type ReactNode } from 'react'
-import { DollarSign, Lock } from 'lucide-react'
+import { DollarSign, Lock, CheckCircle2 } from 'lucide-react'
 import { usePayrollWeekReview } from '@/hooks/payroll/usePayrollWeekReview'
 import { PageHeader, FormButton, InfoBlock, StatusBadge } from '@/components/form'
 import { calculatePayroll, resolveRateAsOf, formatCurrency, type EmployeePaySummary } from '@/lib/payroll/calculations'
@@ -41,8 +41,17 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
   const {
     week, employees, entries, adjustments, feeConfigs, properties, employeeRates,
     mileageReimbursements, excludedPropertyIds,
-    approved, pendingCount, loading, approving, approvePayroll, refetch,
+    approved, pendingCount, unresolvedCount, loading, approving, approvingTimesheet,
+    approvePayroll, approveTimesheet, refetch,
   } = usePayrollWeekReview(weekId)
+
+  const handleApproveTimesheet = async () => {
+    try {
+      await approveTimesheet()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Could not approve the timesheet.')
+    }
+  }
 
   const result = useMemo(() => {
     if (!employees.length) return null
@@ -103,14 +112,30 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
       />
 
       <div className="p-6 space-y-6">
-        {!timesheetApproved && (
+        {!timesheetApproved && (unresolvedCount + pendingCount > 0 ? (
           <InfoBlock variant="warning" title="Timesheet Not Yet Approved">
-            Resolve all flagged entries and approve the timesheet before payroll can be calculated.
+            {unresolvedCount > 0 && (
+              <>{unresolvedCount} unallocated {unresolvedCount === 1 ? 'entry needs a property' : 'entries need a property'}. </>
+            )}
+            {pendingCount > 0 && (
+              <>{pendingCount} pending {pendingCount === 1 ? 'entry needs' : 'entries need'} resolving. </>
+            )}
+            Clear {unresolvedCount + pendingCount === 1 ? 'it' : 'them'}, then approve the timesheet to calculate payroll.
             <div className="mt-1">
               <a href={`/payroll/timesheets?week=${weekId}`} className="underline">Go to Timesheet Adjustments →</a>
             </div>
           </InfoBlock>
-        )}
+        ) : (
+          <InfoBlock variant="success" title="Timesheet Ready to Approve">
+            All entries are allocated and resolved. Approve the timesheet to calculate payroll.
+            <div className="mt-2">
+              <FormButton size="sm" onClick={handleApproveTimesheet} loading={approvingTimesheet}>
+                <CheckCircle2 size={14} className="mr-2 inline" />
+                Approve Timesheet
+              </FormButton>
+            </div>
+          </InfoBlock>
+        ))}
 
         {timesheetApproved && pendingCount > 0 && !approved && (
           <InfoBlock variant="warning" title="Pending Entries Block Approval">

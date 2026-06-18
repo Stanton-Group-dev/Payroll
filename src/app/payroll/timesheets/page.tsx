@@ -1,15 +1,16 @@
 ﻿'use client'
 
 import { Suspense, useState, useEffect, useMemo } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { format } from 'date-fns'
 import { AlertTriangle, Clock, Lock, CheckCircle2 } from 'lucide-react'
+import { createClient } from '@/lib/supabase/client'
 import { usePayrollWeeks } from '@/hooks/payroll/usePayrollWeeks'
 import { usePayrollEmployees } from '@/hooks/payroll/usePayrollEmployees'
 import { useProperties } from '@/hooks/payroll/useProperties'
 import { usePortfolios } from '@/hooks/payroll/usePortfolios'
 import { useTimesheetAdjustments } from '@/hooks/payroll/useTimesheetAdjustments'
-import { PageHeader, FormSelect, FormField } from '@/components/form'
+import { PageHeader, FormSelect, FormField, FormButton } from '@/components/form'
 import { EmployeeSwitcher } from './components/EmployeeSwitcher'
 import { WeekGrid } from './components/WeekGrid'
 import type { SelectedCell } from './components/WeekGrid'
@@ -31,13 +32,15 @@ export default function TimesheetsPage() {
 }
 
 function TimesheetsPageContent() {
-  const { weeks } = usePayrollWeeks()
+  const { weeks, refetch: refetchWeeks } = usePayrollWeeks()
   const { isSuperAdmin } = useAuth()
   const searchParams = useSearchParams()
+  const router = useRouter()
   const { selectedWeekId, setSelectedWeekId } = useSelectedWeek()
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null)
   const [selectedCell, setSelectedCell] = useState<SelectedCell | null>(null)
   const [drawerDirty, setDrawerDirty] = useState(false)
+  const [approvingTimesheet, setApprovingTimesheet] = useState(false)
 
   useEffect(() => {
     const w = searchParams.get('week')
@@ -106,6 +109,30 @@ function TimesheetsPageContent() {
   const totalUnallocated = unallocatedEntries.length
   const totalPending = pendingEntries.length
   const affectedEmployees = new Set(unallocatedEntries.map(e => e.employee_id)).size
+
+  // Timesheet approval (draft → corrections_complete) is what unlocks payroll
+  // calculation on the review page. Only offer it once everything is clear.
+  const isDraft = selectedWeek?.status === 'draft'
+  const canApproveTimesheet = !!selectedWeekId && isDraft && totalUnallocated === 0 && totalPending === 0
+
+  const handleApproveTimesheet = async () => {
+    if (!canApproveTimesheet) return
+    setApprovingTimesheet(true)
+    try {
+      const supabase = createClient()
+      const { error } = await supabase
+        .from('payroll_weeks')
+        .update({ status: 'corrections_complete' })
+        .eq('id', selectedWeekId)
+        .eq('status', 'draft')
+      if (error) throw error
+      await refetchWeeks()
+      router.push(`/payroll/${selectedWeekId}/review`)
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Could not approve the timesheet.')
+      setApprovingTimesheet(false)
+    }
+  }
 
   const closeDrawer = () => {
     setSelectedCell(null)
@@ -179,6 +206,12 @@ function TimesheetsPageContent() {
                 <Lock size={13} />
                 Locked
               </span>
+            )}
+            {canApproveTimesheet && (
+              <FormButton size="sm" onClick={handleApproveTimesheet} loading={approvingTimesheet} className="ml-auto">
+                <CheckCircle2 size={13} className="mr-1.5 inline" />
+                Approve Timesheet
+              </FormButton>
             )}
           </div>
         )}
