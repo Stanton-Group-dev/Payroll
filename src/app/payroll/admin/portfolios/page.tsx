@@ -100,6 +100,10 @@ export default function PortfoliosPage() {
   const [propertyForm, setPropertyForm] = useState<CreatePropertyInput>(emptyPropertyForm())
   const [propertySaving, setPropertySaving] = useState(false)
   const [propertyError, setPropertyError] = useState<string | null>(null)
+  const [editDrawerOpen, setEditDrawerOpen] = useState(false)
+  const [editForm, setEditForm] = useState<{ id: string; name: string; description: string; owner_llc: string; is_active: boolean } | null>(null)
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -294,6 +298,46 @@ export default function PortfoliosPage() {
     setPropertyForm(emptyPropertyForm())
     await load()
     setPropertySaving(false)
+  }
+
+  const openEdit = (p: Portfolio) => {
+    setEditError(null)
+    setEditForm({
+      id: p.id,
+      name: p.name,
+      description: p.description ?? '',
+      owner_llc: p.owner_llc ?? '',
+      is_active: p.is_active,
+    })
+    setEditDrawerOpen(true)
+  }
+
+  const handleUpdatePortfolio = async () => {
+    if (!editForm) return
+    setEditError(null)
+    if (!isAdmin) { setEditError('Only admins can edit portfolios.'); return }
+
+    const name = editForm.name.trim()
+    if (!name) { setEditError('Portfolio name is required.'); return }
+
+    setEditSaving(true)
+    const supabase = createClient()
+    const { error } = await supabase
+      .from('portfolios')
+      .update({
+        name,
+        description: editForm.description.trim() || null,
+        owner_llc: editForm.owner_llc.trim() || null,
+        is_active: editForm.is_active,
+      })
+      .eq('id', editForm.id)
+
+    if (error) { setEditError(error.message); setEditSaving(false); return }
+
+    setEditDrawerOpen(false)
+    setEditForm(null)
+    await load()
+    setEditSaving(false)
   }
 
   return (
@@ -602,7 +646,8 @@ export default function PortfoliosPage() {
                       {p.created_at && <span>Created {format(new Date(p.created_at), 'MMM yyyy')}</span>}
                       {isAdmin && (
                         <button
-                          onClick={e => { e.stopPropagation() }}
+                          onClick={e => { e.stopPropagation(); openEdit(p) }}
+                          title="Edit portfolio"
                           className="text-[var(--muted)] hover:text-[var(--primary)] transition-colors"
                         >
                           <Pencil size={13} />
@@ -725,6 +770,61 @@ export default function PortfoliosPage() {
           </FormButton>
           <FormButton variant="ghost" onClick={() => setPropertyDrawerOpen(false)}>Cancel</FormButton>
         </div>
+      </Drawer>
+
+      <Drawer open={editDrawerOpen} onClose={() => setEditDrawerOpen(false)} title="Edit Portfolio">
+        {editError && <InfoBlock variant="error">{editError}</InfoBlock>}
+
+        {editForm && (
+          <>
+            <FormField label="Portfolio Name" required>
+              <FormInput
+                value={editForm.name}
+                onChange={e => setEditForm(f => f && ({ ...f, name: e.target.value }))}
+                placeholder="e.g., SREP Southend LLC"
+              />
+            </FormField>
+
+            <FormField label="Description">
+              <FormTextarea
+                value={editForm.description}
+                onChange={e => setEditForm(f => f && ({ ...f, description: e.target.value }))}
+                rows={2}
+                placeholder="Optional notes about this portfolio"
+              />
+            </FormField>
+
+            <FormField label="Owner LLC (Billing Entity)" helperText="Default billing entity for properties in this portfolio that don't set their own.">
+              <FormInput
+                value={editForm.owner_llc}
+                onChange={e => setEditForm(f => f && ({ ...f, owner_llc: e.target.value }))}
+                placeholder="e.g., SREP Westend LLC"
+              />
+            </FormField>
+
+            <label className="flex items-center gap-2 text-sm cursor-pointer mb-4">
+              <input
+                type="checkbox"
+                checked={editForm.is_active}
+                onChange={e => setEditForm(f => f && ({ ...f, is_active: e.target.checked }))}
+                className="w-4 h-4 rounded-none"
+              />
+              Active
+            </label>
+            {!editForm.is_active && (
+              <InfoBlock variant="warning">
+                Deactivating hides this portfolio from the list. Its properties keep their assignment but won&rsquo;t show here until it&rsquo;s reactivated.
+              </InfoBlock>
+            )}
+
+            <div className="flex gap-2 pt-4 border-t border-[var(--divider)]">
+              <FormButton onClick={handleUpdatePortfolio} loading={editSaving} fullWidth>
+                Save Changes
+              </FormButton>
+              <FormButton variant="ghost" onClick={() => setEditDrawerOpen(false)}>Cancel</FormButton>
+            </div>
+          </>
+        )}
       </Drawer>
     </div>
   )
