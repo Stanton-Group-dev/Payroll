@@ -43,12 +43,12 @@ fail with `"Unregistered API key"`. Create `.env.local` with:
 
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=https://wkwmxxlfheywwbgdbzxe.supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<active publishable key>   # from Supabase project / Bitwarden
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<active publishable key>   # from Supabase project / Infisical
 WORKYARD_MOCK=1                                                 # dummy import data, no creds needed
 ```
 
 - The **active publishable key** (browser-safe `sb_publishable_...`) is on the Supabase
-  project "Stanton Main DB" and should be stored in Bitwarden. Do not paste it into any
+  project "Stanton Main DB" and should be stored in Infisical. Do not paste it into any
   committed file.
 - `WORKYARD_MOCK=1` makes the Workyard API-pull return deterministic dummy time cards.
 

@@ -43,6 +43,13 @@ interface DataTableProps<T extends Record<string, unknown>> {
   tableId?: string
   selectedIds?: Set<string>
   rowKey?: keyof T
+  /**
+   * When true, the table flows with the page (no internal vertical scroll) and the
+   * column header row sticks to the top of the nearest scrolling ancestor. Use this
+   * when the table lives inside a page-level scroll region so the page header can
+   * scroll away while the column headers pin to the top.
+   */
+  stickyHeader?: boolean
 }
 
 const densityPadding: Record<Density, string> = {
@@ -58,6 +65,7 @@ function SortableHeader({
   onSort,
   width,
   onResizeStart,
+  sticky = false,
 }: {
   column: Column
   sortKey: string | null
@@ -65,6 +73,7 @@ function SortableHeader({
   onSort: (key: string) => void
   width: number
   onResizeStart: (e: React.MouseEvent, key: string) => void
+  sticky?: boolean
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: column.key })
   const style = {
@@ -82,7 +91,7 @@ function SortableHeader({
     <th
       ref={setNodeRef}
       style={style}
-      className="relative bg-[var(--surface-chrome)] text-[var(--ink)] text-left text-xs font-medium uppercase tracking-wider select-none group"
+      className={`${sticky ? 'sticky top-0 z-20' : 'relative'} bg-[var(--surface-chrome)] text-[var(--ink)] text-left text-xs font-medium uppercase tracking-wider select-none group`}
     >
       <div className="flex items-center gap-1 px-3 py-3">
         <span
@@ -123,6 +132,7 @@ export default function DataTable<T extends Record<string, unknown>>({
   tableId = 'default',
   selectedIds,
   rowKey = 'id' as keyof T,
+  stickyHeader = false,
 }: DataTableProps<T>) {
   const storageKey = `payroll_table_${tableId}`
 
@@ -304,8 +314,9 @@ export default function DataTable<T extends Record<string, unknown>>({
         </div>
       </div>
 
-      {/* Table */}
-      <div className="overflow-auto flex-1">
+      {/* Table — in stickyHeader mode the table flows with the page (no internal
+          scroll container) so the sticky header pins to the page-level scroll region. */}
+      <div className={stickyHeader ? '' : 'overflow-auto flex-1'}>
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <table className="border-collapse text-sm" style={{ minWidth: '100%', tableLayout: 'fixed' }}>
             <thead>
@@ -320,6 +331,7 @@ export default function DataTable<T extends Record<string, unknown>>({
                       onSort={handleSort}
                       width={columnWidths[col.key] ?? col.width ?? 150}
                       onResizeStart={handleResizeStart}
+                      sticky={stickyHeader}
                     />
                   ))}
                 </tr>

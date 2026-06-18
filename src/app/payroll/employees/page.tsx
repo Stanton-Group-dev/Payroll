@@ -298,6 +298,9 @@ export default function EmployeesPage() {
 
   return (
     <div className="flex flex-col h-full">
+      {/* Single page-level scroll region: the header scrolls up out of view and the
+          DataTable column headers pin to the top via stickyHeader. */}
+      <div className="flex-1 overflow-auto">
       <PageHeader
         title="Employees & Rates"
         subtitle={`${employees.filter(e => e.is_active).length} active employees`}
@@ -411,17 +414,16 @@ export default function EmployeesPage() {
         </div>
       )}
 
-      <div className="flex-1 overflow-hidden">
-        <DataTable
-          data={tableData}
-          columns={columns}
-          loading={loading}
-          tableId="employees"
-          onRowClick={(row) => openEdit(row as unknown as PayrollEmployee)}
-          emptyMessage="No employees found"
-          exportable
-        />
-      </div>
+      <DataTable
+        data={tableData}
+        columns={columns}
+        loading={loading}
+        tableId="employees"
+        onRowClick={(row) => openEdit(row as unknown as PayrollEmployee)}
+        emptyMessage="No employees found"
+        exportable
+        stickyHeader
+      />
 
       {/* Workyard Reliability Section */}
       <div className="border-t border-[var(--border)]">
@@ -485,6 +487,7 @@ export default function EmployeesPage() {
             )}
           </div>
         )}
+      </div>
       </div>
 
       <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} title={editing.id ? 'Edit Employee' : 'New Employee'} width={520}>
