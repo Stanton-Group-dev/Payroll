@@ -391,7 +391,7 @@ export async function queryPayrollComparison(
   const prior = (priorData as ReportWeek | null) ?? null
 
   // Shared reference data, loaded once for both weeks.
-  const [{ data: empData }, { data: rateData }, { data: feeData }, { data: propData }] = await Promise.all([
+  const [{ data: empData }, { data: rateData }, { data: feeData }, { data: propData }, { data: portData }] = await Promise.all([
     ctx.supabase.from('payroll_employees').select('id, name, type, hourly_rate, weekly_rate, pay_tax, wc').eq('is_active', true),
     ctx.supabase.from('payroll_employee_rates').select('id, employee_id, rate, effective_date'),
     ctx.supabase.from('payroll_management_fee_config').select('id, rate_pct, portfolio_id, effective_date'),
@@ -399,11 +399,13 @@ export async function queryPayrollComparison(
       .from('properties')
       .select('id, appfolio_property_id, code, name, total_units, portfolio_id, address, billing_llc, is_active')
       .eq('is_active', true),
+    ctx.supabase.from('portfolios').select('id, name'),
   ])
   const employees = (empData ?? []) as PayrollEmployee[]
   const rates = (rateData ?? []) as PayrollEmployeeRate[]
   const feeConfigs = (feeData ?? []) as PayrollManagementFeeConfig[]
   const properties = (propData ?? []) as Property[]
+  const portfolios = (portData ?? []) as { id: string; name: string }[]
 
   const currentResult = await runWeekResult(ctx, target, employees, rates, feeConfigs, properties)
   const priorResult = prior
@@ -413,7 +415,7 @@ export async function queryPayrollComparison(
   const comparison = comparePayroll(currentResult, priorResult, {
     current: `Week of ${target.week_start}`,
     prior: prior ? `Week of ${prior.week_start}` : 'no prior week',
-  })
+  }, portfolios)
   if (!prior) comparison.notable.unshift('No prior payroll week exists — nothing to compare against.')
   return { ...comparison, hasPrior: !!prior }
 }

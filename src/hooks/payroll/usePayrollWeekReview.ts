@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { isNonBillableProperty } from '@/lib/payroll/properties'
 import type {
   PayrollWeek,
   PayrollEmployee,
@@ -86,7 +87,11 @@ export function usePayrollWeekReview(weekId: string) {
     )
     setExcludedPropertyIds(new Set(
       props
-        .filter(p => p.include_in_invoicing === false || (p.portfolio_id != null && excludedPortfolios.has(p.portfolio_id)))
+        .filter(p =>
+          isNonBillableProperty(p) ||
+          p.include_in_invoicing === false ||
+          (p.portfolio_id != null && excludedPortfolios.has(p.portfolio_id)),
+        )
         .map(p => p.id),
     ))
     setEmployeeRates(ratesRes.data ?? [])

@@ -65,6 +65,7 @@ export interface PropertyCostSummary {
   property_id: string
   property_code: string
   property_name: string
+  portfolio_id: string | null
   total_units: number
   labor_cost: number
   spread_cost: number
@@ -128,8 +129,6 @@ export function calculatePayroll(
 ): PayrollCalculationResult {
   const employeeMap = Object.fromEntries(employees.map(e => [e.id, e]))
   const propertyMap = Object.fromEntries(properties.map(p => [p.id, p]))
-
-  const totalPortfolioUnits = properties.reduce((sum, p) => sum + (p.total_units ?? 0), 0)
 
   // Approved mileage reimbursement dollars per employee (pending/denied are ignored).
   const approvedMileage: Record<string, number> = {}
@@ -259,15 +258,31 @@ export function calculatePayroll(
     propLaborCost[entry.property_id] = (propLaborCost[entry.property_id] ?? 0) + cost
   }
 
-  // Method B: Unit-weighted spread (phone + tool adjustments)
-  const spreadTotal = adjustments
+  // Method B: Unit-weighted spread across the whole portfolio.
+  //  - phone + tool reimbursements (general, not tied to one property)
+  //  - salaried employees' wages: a salaried worker's pay isn't earned at any single
+  //    property, so it's billed across ALL properties proportional to unit count
+  //    (a 167-unit portfolio bears more than a 6-unit building). Hourly labor still
+  //    bills direct via Method A; salaried have no hourly_rate so they'd otherwise
+  //    be paid-but-unbilled.
+  const adjustmentSpread = adjustments
     .filter(a => a.type === 'phone' || a.type === 'tool')
     .reduce((sum, a) => sum + a.amount, 0)
+  const salariedSpread = employees
+    .filter(e => e.type === 'salaried' && e.weekly_rate)
+    .reduce((sum, e) => sum + Number(e.weekly_rate), 0)
+  const spreadTotal = adjustmentSpread + salariedSpread
 
+  // Spread only across BILLABLE properties — never onto non-billable / admin / test /
+  // stale rows (include_in_invoicing = false), so the full salaried cost lands on real
+  // LLCs and nothing leaks onto "Stanton Management" placeholders.
+  const billableUnits = properties
+    .filter(p => p.include_in_invoicing !== false)
+    .reduce((sum, p) => sum + (p.total_units ?? 0), 0)
   const propSpreadCost: Record<string, number> = {}
   for (const prop of properties) {
-    if (!totalPortfolioUnits) continue
-    propSpreadCost[prop.id] = (prop.total_units ?? 0) / totalPortfolioUnits * spreadTotal
+    if (!billableUnits || prop.include_in_invoicing === false) continue
+    propSpreadCost[prop.id] = (prop.total_units ?? 0) / billableUnits * spreadTotal
   }
 
   // Method C: Direct mileage by property. Each employee's approved reimbursement is
@@ -311,6 +326,7 @@ export function calculatePayroll(
       property_id: prop.id,
       property_code: prop.code,
       property_name: prop.name,
+      portfolio_id: prop.portfolio_id,
       total_units: prop.total_units ?? 0,
       labor_cost: round2(labor),
       spread_cost: round2(spread),
@@ -369,6 +385,30 @@ export interface ComparisonRow {
   status: 'new' | 'dropped' | 'changed' | 'same'
 }
 
+/**
+ * A cost row that also carries a per-unit cost, for week-over-week comparison at
+ * the portfolio (and, when nested, building) level. `units` is the stable
+ * denominator — the portfolio's full active-unit count — used for both weeks'
+ * per-unit figures, so the per-unit delta reflects cost change, not unit drift.
+ */
+export interface CostCompareRow {
+  key: string
+  label: string
+  /** Total cost this week / prior week. */
+  current: number
+  prior: number
+  delta: number
+  pct: number | null
+  status: ComparisonRow['status']
+  units: number
+  perUnitCurrent: number
+  perUnitPrior: number
+  perUnitDelta: number
+  perUnitPct: number | null
+  /** Building-level rows under a portfolio (only properties with cost in either week). */
+  children?: CostCompareRow[]
+}
+
 export interface PayrollComparison {
   currentLabel: string
   priorLabel: string
@@ -382,6 +422,9 @@ export interface PayrollComparison {
   }
   byEmployee: ComparisonRow[]
   byProperty: ComparisonRow[]
+  /** Per-portfolio total-cost & cost-per-unit deltas, each expandable to its buildings.
+   *  Empty unless the portfolio roster is supplied to comparePayroll(). */
+  byPortfolio: CostCompareRow[]
   /** Plain-language highlights, suitable for an agent to read back. */
   notable: string[]
 }
@@ -415,10 +458,95 @@ function totalHours(r: PayrollCalculationResult): number {
  * calculatePayroll() for each week and pass the two results. Produces total,
  * per-employee, and per-property deltas plus human-readable highlights.
  */
+/** Build one portfolio/building cost row, deriving the per-unit figures from `units`. */
+function costCompareRow(
+  key: string,
+  label: string,
+  cur: number,
+  pri: number,
+  units: number,
+  children?: CostCompareRow[]
+): CostCompareRow {
+  const puCur = units > 0 ? cur / units : 0
+  const puPri = units > 0 ? pri / units : 0
+  return {
+    key,
+    label,
+    current: round2(cur),
+    prior: round2(pri),
+    delta: round2(cur - pri),
+    pct: pri !== 0 ? round2(((cur - pri) / Math.abs(pri)) * 100) : null,
+    status: rowStatus(cur, pri),
+    units,
+    perUnitCurrent: round2(puCur),
+    perUnitPrior: round2(puPri),
+    perUnitDelta: round2(puCur - puPri),
+    perUnitPct: puPri !== 0 ? round2(((puCur - puPri) / Math.abs(puPri)) * 100) : null,
+    children,
+  }
+}
+
+const UNASSIGNED_PORTFOLIO = '__unassigned__'
+
+/**
+ * Roll the per-property costs up to the portfolio level for both weeks. The
+ * denominator for cost-per-unit is the portfolio's full active-unit count (every
+ * active property is present in property_costs, even at zero cost), so it's stable
+ * week to week. Buildings with no cost in either week are dropped from the expand
+ * list but still count toward the portfolio's unit total.
+ */
+function buildPortfolioComparison(
+  current: PayrollCalculationResult,
+  prior: PayrollCalculationResult,
+  portfolios: { id: string; name: string }[]
+): CostCompareRow[] {
+  const nameOf = new Map(portfolios.map((p) => [p.id, p.name]))
+  const propCur = new Map(current.property_costs.map((p) => [p.property_id, p]))
+  const propPri = new Map(prior.property_costs.map((p) => [p.property_id, p]))
+  const allPropIds = new Set([...propCur.keys(), ...propPri.keys()])
+
+  // Group property ids by portfolio, accumulating the portfolio's full unit count.
+  const groups = new Map<string, { units: number; propIds: string[] }>()
+  for (const id of allPropIds) {
+    const meta = propCur.get(id) ?? propPri.get(id)!
+    const pid = meta.portfolio_id ?? UNASSIGNED_PORTFOLIO
+    const units = propCur.get(id)?.total_units ?? propPri.get(id)?.total_units ?? 0
+    const g = groups.get(pid) ?? { units: 0, propIds: [] }
+    g.units += units
+    g.propIds.push(id)
+    groups.set(pid, g)
+  }
+
+  const rows: CostCompareRow[] = []
+  for (const [pid, g] of groups) {
+    let curTotal = 0
+    let priTotal = 0
+    const children: CostCompareRow[] = []
+    for (const id of g.propIds) {
+      const c = propCur.get(id)
+      const p = propPri.get(id)
+      const cur = c?.total_cost ?? 0
+      const pri = p?.total_cost ?? 0
+      curTotal += cur
+      priTotal += pri
+      if (cur === 0 && pri === 0) continue // active but idle both weeks — counts for units, not shown
+      const meta = c ?? p!
+      const units = c?.total_units ?? p?.total_units ?? 0
+      children.push(costCompareRow(id, `${meta.property_code} ${meta.property_name}`, cur, pri, units))
+    }
+    if (curTotal === 0 && priTotal === 0) continue
+    children.sort((a, b) => b.current - a.current || b.prior - a.prior)
+    const label = pid === UNASSIGNED_PORTFOLIO ? 'Unassigned (no portfolio)' : nameOf.get(pid) ?? pid
+    rows.push(costCompareRow(pid, label, curTotal, priTotal, g.units, children))
+  }
+  return rows.sort((a, b) => b.current - a.current || b.prior - a.prior)
+}
+
 export function comparePayroll(
   current: PayrollCalculationResult,
   prior: PayrollCalculationResult,
-  labels: { current: string; prior: string }
+  labels: { current: string; prior: string },
+  portfolios: { id: string; name: string }[] = []
 ): PayrollComparison {
   // Per-employee gross, keyed by id across both weeks.
   const empCur = new Map(current.employee_summaries.map((e) => [e.employee_id, e]))
@@ -496,12 +624,15 @@ export function comparePayroll(
     )
   }
 
+  const byPortfolio = buildPortfolioComparison(current, prior, portfolios)
+
   return {
     currentLabel: labels.current,
     priorLabel: labels.prior,
     totals,
     byEmployee,
     byProperty,
+    byPortfolio,
     notable,
   }
 }

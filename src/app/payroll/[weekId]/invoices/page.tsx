@@ -24,6 +24,12 @@ export default function InvoicesPage({ params }: { params: Promise<{ weekId: str
         subtitle={week ? `Week of ${week.week_start}` : ''}
         actions={
           <div className="flex gap-2">
+            <Link
+              href={`/payroll/${weekId}/invoices/preview`}
+              className="inline-flex items-center px-3 py-1.5 text-sm border border-[var(--border)] text-[var(--ink)] hover:bg-[var(--bg-section)]"
+            >
+              Preview (itemized)
+            </Link>
             {payrollApproved && invoices.length === 0 && (
               <FormButton size="sm" onClick={() => generateInvoices(refetchInvoices)} loading={generating}>
                 <Plus size={14} className="mr-1" />

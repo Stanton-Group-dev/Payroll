@@ -73,7 +73,7 @@ export default function PayrollLayout({ children }: { children: React.ReactNode 
     <SelectedWeekProvider>
     <div className="flex min-h-screen bg-[var(--paper)]">
       {/* Sidebar */}
-      <aside className="w-56 bg-[var(--primary)] flex flex-col shrink-0">
+      <aside className="w-56 bg-[var(--primary)] flex flex-col shrink-0 print:hidden">
         {/* Logo */}
         <div className="px-5 py-6 border-b border-white/10">
           <p className="text-xs text-white/50 uppercase tracking-widest font-medium mb-1">Stanton Management</p>

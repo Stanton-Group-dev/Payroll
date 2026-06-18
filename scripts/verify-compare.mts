@@ -21,9 +21,9 @@ function emp(id: string, name: string, gross: number): EmployeePaySummary {
     payroll_tax: 0, workers_comp: 0, management_fee: 0, total_billable: gross,
   }
 }
-function prop(id: string, code: string, name: string, total: number): PropertyCostSummary {
+function prop(id: string, code: string, name: string, total: number, portfolioId: string | null = null): PropertyCostSummary {
   return {
-    property_id: id, property_code: code, property_name: name, total_units: 10,
+    property_id: id, property_code: code, property_name: name, portfolio_id: portfolioId, total_units: 10,
     labor_cost: total, spread_cost: 0, mileage_cost: 0, mgmt_fee: 0, total_cost: total, cost_per_unit: total / 10,
   }
 }
@@ -66,6 +66,34 @@ check('e1 changed +200', e1.status === 'changed' && e1.delta === 200)
 // Per-property: p1 changed +100, p2 new +50; sorted p1 then p2
 check('property order p1,p2', cmp.byProperty.map((r) => r.key).join(',') === 'p1,p2')
 check('p2 new', cmp.byProperty.find((r) => r.key === 'p2')!.status === 'new')
+
+// Per-portfolio rollup: two portfolios, A holds p1+p2 (20 units), B holds p3 (10 units).
+const portfolios = [{ id: 'A', name: 'Alpha Portfolio' }, { id: 'B', name: 'Beta Portfolio' }]
+const portPrior = result(
+  [emp('e1', 'Stan', 1000)],
+  [prop('p1', 'S1', 'Alpha', 800, 'A'), prop('p2', 'S2', 'Beta', 0, 'A'), prop('p3', 'S3', 'Gamma', 200, 'B')],
+  1000
+)
+const portCurrent = result(
+  [emp('e1', 'Stan', 1200)],
+  [prop('p1', 'S1', 'Alpha', 900, 'A'), prop('p2', 'S2', 'Beta', 100, 'A'), prop('p3', 'S3', 'Gamma', 200, 'B')],
+  1200
+)
+const pc = comparePayroll(portCurrent, portPrior, { current: 'cur', prior: 'pri' }, portfolios)
+const A = pc.byPortfolio.find((r) => r.key === 'A')!
+const B = pc.byPortfolio.find((r) => r.key === 'B')!
+// A: total 800→1000 across 20 units → $/unit 40→50
+check('portfolio A total 800→1000', A.prior === 800 && A.current === 1000 && A.delta === 200)
+check('portfolio A units 20 (p1+p2)', A.units === 20)
+check('portfolio A $/unit 40→50', A.perUnitPrior === 40 && A.perUnitCurrent === 50 && A.perUnitDelta === 10)
+check('portfolio A expands to 2 buildings', (A.children?.length ?? 0) === 2)
+check('portfolio A sorted by current desc (p1,p2)', A.children!.map((c) => c.key).join(',') === 'p1,p2')
+// B: single building, 200→200, $/unit 20→20, no change
+check('portfolio B flat 200', B.current === 200 && B.delta === 0 && B.perUnitCurrent === 20)
+// Sorted by current total desc → A (1000) before B (200)
+check('portfolio order A,B', pc.byPortfolio.map((r) => r.key).join(',') === 'A,B')
+// Without a portfolio roster, byPortfolio still builds (Unassigned bucket)
+check('byPortfolio empty roster → unassigned bucket', cmp.byPortfolio.length === 1 && cmp.byPortfolio[0].key === '__unassigned__')
 
 // Highlights
 check('notable mentions New Guy', cmp.notable.some((n) => n.includes('New Guy')))

@@ -28,6 +28,23 @@ export function isDeleteMarked(p: PropertyMarkers): boolean {
   )
 }
 
+/**
+ * True for any property that must NEVER appear on a customer invoice — the
+ * delete-marked rows (above) plus the test/placeholder scaffolding that the
+ * AppFolio import keeps re-creating ("000 - Test Property", "… Test …").
+ *
+ * The flag `include_in_invoicing` is NOT enough on its own: the AppFolio re-sync
+ * resets it to true, which is exactly why these rows kept reappearing on bills
+ * even after being hidden from the pickers. Name/code is the durable signal, so
+ * the invoicing and review paths gate on this regardless of the flag.
+ */
+export function isNonBillableProperty(p: PropertyMarkers): boolean {
+  if (isDeleteMarked(p)) return true
+  const code = (p.code ?? '').trim().toLowerCase()
+  const name = (p.name ?? '').trim().toLowerCase()
+  return code === '000' || name.includes('test property')
+}
+
 /** True when a property belongs to the Westend billing entity (opt-in for spread). */
 export function isWestendProperty(p: PropertyMarkers): boolean {
   return (p.billing_llc ?? '').trim().toLowerCase() === WESTEND_BILLING_LLC.toLowerCase()

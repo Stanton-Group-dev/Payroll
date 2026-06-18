@@ -35,7 +35,14 @@ export default function StatementPage({ params }: { params: Promise<{ weekId: st
       <PageHeader
         title="Statement Generator"
         subtitle={week ? `Consolidated statement — week of ${week.week_start}` : ''}
-        actions={<StatusBadge status={week?.status ?? 'draft'} />}
+        actions={
+          <div className="flex items-center gap-3">
+            <a href={`/payroll/${weekId}/statement/print`} target="_blank" className="text-sm text-[var(--primary)] hover:underline">
+              View / Print Statement →
+            </a>
+            <StatusBadge status={week?.status ?? 'draft'} />
+          </div>
+        }
       />
 
       <div className="p-6 max-w-3xl">

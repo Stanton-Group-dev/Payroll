@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
-import { ChevronDown, ChevronUp, ArrowUp, ArrowDown, Minus, GitCompareArrows } from 'lucide-react'
-import { formatCurrency, type Delta, type ComparisonRow } from '@/lib/payroll/calculations'
+import { Fragment, useState } from 'react'
+import { ChevronDown, ChevronUp, ChevronRight, ArrowUp, ArrowDown, Minus, GitCompareArrows } from 'lucide-react'
+import { formatCurrency, type Delta, type ComparisonRow, type CostCompareRow } from '@/lib/payroll/calculations'
 import { usePayrollComparison } from '@/hooks/payroll/usePayrollComparison'
 import { InfoBlock } from '@/components/form'
 
@@ -82,6 +82,93 @@ function CompareTable({ title, rows, money = true }: { title: string; rows: Comp
 }
 
 /**
+ * Per-portfolio cost comparison with cost-per-unit, each row expandable to its
+ * buildings. The $/unit denominator is the portfolio's full active-unit count, so
+ * the per-unit delta tracks cost change rather than which buildings got work.
+ */
+function PortfolioCompareTable({ rows }: { rows: CostCompareRow[] }) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  if (rows.length === 0) return null
+  const toggle = (key: string) =>
+    setExpanded(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+
+  return (
+    <div>
+      <h4 className="font-serif text-sm text-[var(--primary)] mb-2">By Portfolio (total cost & cost / unit)</h4>
+      <div className="border border-[var(--border)] overflow-auto">
+        <table className="w-full text-sm border-collapse">
+          <thead>
+            <tr className="bg-[var(--bg-section)] text-[var(--muted)] text-xs">
+              <th className="px-3 py-2 text-left font-medium">Portfolio</th>
+              <th className="px-3 py-2 text-right font-medium">Units</th>
+              <th className="px-3 py-2 text-right font-medium">$/Unit Prior</th>
+              <th className="px-3 py-2 text-right font-medium">$/Unit Cur</th>
+              <th className="px-3 py-2 text-right font-medium">Δ $/Unit</th>
+              <th className="px-3 py-2 text-right font-medium">Total Prior</th>
+              <th className="px-3 py-2 text-right font-medium">Total Cur</th>
+              <th className="px-3 py-2 text-right font-medium">Δ Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((p, i) => {
+              const open = expanded.has(p.key)
+              const kids = p.children ?? []
+              return (
+                <Fragment key={p.key}>
+                  <tr
+                    onClick={() => kids.length > 0 && toggle(p.key)}
+                    className={`border-t border-[var(--divider)] ${kids.length > 0 ? 'cursor-pointer' : ''} ${i % 2 ? 'bg-[var(--bg-section)]' : 'bg-white'} hover:bg-[var(--primary)]/5`}
+                  >
+                    <td className="px-3 py-2 font-medium">
+                      <span className="inline-flex items-center gap-1">
+                        {kids.length > 0
+                          ? (open ? <ChevronDown size={13} className="text-[var(--muted)]" /> : <ChevronRight size={13} className="text-[var(--muted)]" />)
+                          : <span className="w-[13px] inline-block" />}
+                        {p.label}
+                        {kids.length > 0 && (
+                          <span className="text-[10px] text-[var(--muted)] font-normal">
+                            ({kids.length} {kids.length === 1 ? 'building' : 'buildings'})
+                          </span>
+                        )}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right text-[var(--muted)]">{p.units || '—'}</td>
+                    <td className="px-3 py-2 text-right text-[var(--muted)]">{formatCurrency(p.perUnitPrior)}</td>
+                    <td className="px-3 py-2 text-right font-medium">{formatCurrency(p.perUnitCurrent)}</td>
+                    <td className="px-3 py-2 text-right"><DeltaTag delta={p.perUnitDelta} pct={p.perUnitPct} /></td>
+                    <td className="px-3 py-2 text-right text-[var(--muted)]">{formatCurrency(p.prior)}</td>
+                    <td className="px-3 py-2 text-right font-medium">{formatCurrency(p.current)}</td>
+                    <td className="px-3 py-2 text-right"><DeltaTag delta={p.delta} pct={p.pct} /></td>
+                  </tr>
+                  {open &&
+                    kids.map(b => (
+                      <tr key={b.key} className="border-t border-[var(--divider)] bg-[var(--bg-section)] text-xs">
+                        <td className="px-3 py-1.5 pl-9 text-[var(--muted)]">{b.label}</td>
+                        <td className="px-3 py-1.5 text-right text-[var(--muted)]">{b.units || '—'}</td>
+                        <td className="px-3 py-1.5 text-right text-[var(--muted)]">{formatCurrency(b.perUnitPrior)}</td>
+                        <td className="px-3 py-1.5 text-right">{formatCurrency(b.perUnitCurrent)}</td>
+                        <td className="px-3 py-1.5 text-right"><DeltaTag delta={b.perUnitDelta} pct={b.perUnitPct} /></td>
+                        <td className="px-3 py-1.5 text-right text-[var(--muted)]">{formatCurrency(b.prior)}</td>
+                        <td className="px-3 py-1.5 text-right">{formatCurrency(b.current)}</td>
+                        <td className="px-3 py-1.5 text-right"><DeltaTag delta={b.delta} pct={b.pct} /></td>
+                      </tr>
+                    ))}
+                </Fragment>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+/**
  * "Compare to prior week" — runs payroll for this week and the previous one and
  * shows the deltas. Lazy: fetches only when expanded. Same engine as the review
  * table, so the numbers reconcile.
@@ -139,8 +226,8 @@ export function PayrollComparisonPanel({ weekId }: { weekId: string }) {
                 <MetricCard label="Total Hours" metric={report.totals.total_hours} money={false} />
               </div>
 
+              <PortfolioCompareTable rows={report.byPortfolio} />
               <CompareTable title="By Employee (gross pay)" rows={report.byEmployee} />
-              <CompareTable title="By Property (total cost)" rows={report.byProperty.slice(0, 10)} />
             </>
           )}
         </div>

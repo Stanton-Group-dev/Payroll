@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { isNonBillableProperty } from '@/lib/payroll/properties'
 import type { PayrollWeek } from '@/lib/supabase/types'
 
 export interface PropertyCost {
@@ -63,6 +64,10 @@ export function usePayrollWeekInvoices(weekId: string) {
       const typedRow = row as unknown as WeeklyPropertyCostRow
       const prop = typedRow.property
       if (!prop) continue
+      // Never bill delete-marked / test-placeholder rows, no matter what their
+      // include_in_invoicing flag says — the AppFolio re-sync keeps flipping that
+      // flag back on, which is why these kept reappearing on invoices.
+      if (isNonBillableProperty(prop)) continue
       // Skip properties (or whole portfolios) turned off in Invoicing settings.
       // Absence of the flag means included (default true).
       if (prop.include_in_invoicing === false) continue
