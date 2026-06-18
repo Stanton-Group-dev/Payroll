@@ -8,22 +8,21 @@ import type { PropertyOption } from '@/hooks/payroll/useProperties'
 import { FormSelect, FormField, FormInput, FormTextarea, FormButton, InfoBlock } from '@/components/form'
 
 interface CarryForwardPanelProps {
-  employees: PayrollEmployee[]
+  selectedEmployee: PayrollEmployee | undefined
   approvedWeeks: PayrollWeek[]
   properties: PropertyOption[]
   addCarryForward: (params: { employeeId: string; priorWeekId: string; amount: number; description: string; propertyId?: string }) => Promise<void>
 }
 
-export function CarryForwardPanel({ employees, approvedWeeks, properties, addCarryForward }: CarryForwardPanelProps) {
+export function CarryForwardPanel({ selectedEmployee, approvedWeeks, properties, addCarryForward }: CarryForwardPanelProps) {
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [inputMode, setInputMode] = useState<'dollars' | 'hours'>('dollars')
 
-  const [form, setForm] = useState({ employeeId: '', priorWeekId: '', amount: '', propertyId: '', reason: '' })
+  const [form, setForm] = useState({ priorWeekId: '', amount: '', propertyId: '', reason: '' })
   const set = (k: Partial<typeof form>) => setForm(f => ({ ...f, ...k }))
 
-  const selectedEmployee = employees.find(e => e.id === form.employeeId)
   const hourlyRate = selectedEmployee?.hourly_rate ?? null
   const derivedDollars = inputMode === 'hours' && hourlyRate && form.amount
     ? parseFloat((parseFloat(form.amount) * hourlyRate).toFixed(2))
@@ -31,7 +30,7 @@ export function CarryForwardPanel({ employees, approvedWeeks, properties, addCar
 
   const handleAdd = async () => {
     setErr(null)
-    if (!form.employeeId) { setErr('Select an employee'); return }
+    if (!selectedEmployee) { setErr('No employee selected'); return }
     if (!form.priorWeekId) { setErr('Select the prior week'); return }
     const rawAmt = parseFloat(form.amount)
     if (!rawAmt || rawAmt <= 0) { setErr(`Enter a valid ${inputMode === 'hours' ? 'hour count' : 'amount'} (> 0)`); return }
@@ -50,13 +49,13 @@ export function CarryForwardPanel({ employees, approvedWeeks, properties, addCar
     setSaving(true)
     try {
       await addCarryForward({
-        employeeId: form.employeeId,
+        employeeId: selectedEmployee.id,
         priorWeekId: form.priorWeekId,
         amount: dollarAmount,
         description: descParts,
         propertyId: form.propertyId || undefined,
       })
-      setForm({ employeeId: '', priorWeekId: '', amount: '', propertyId: '', reason: '' })
+      setForm({ priorWeekId: '', amount: '', propertyId: '', reason: '' })
       setOpen(false)
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Failed to add carry-forward')
@@ -85,11 +84,10 @@ export function CarryForwardPanel({ employees, approvedWeeks, properties, addCar
               {err && <InfoBlock variant="error">{err}</InfoBlock>}
 
               <div className="grid grid-cols-2 gap-4 mb-4">
-                <FormField label="Employee" required>
-                  <FormSelect value={form.employeeId} onChange={e => set({ employeeId: e.target.value })}>
-                    <option value="">— Select —</option>
-                    {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-                  </FormSelect>
+                <FormField label="Employee">
+                  <div className="px-3 py-2 text-sm text-[var(--primary)] bg-[var(--bg-section)] border border-[var(--border)]">
+                    {selectedEmployee?.name ?? '—'}
+                  </div>
                 </FormField>
 
                 <FormField label="Prior Week (approved)" required>

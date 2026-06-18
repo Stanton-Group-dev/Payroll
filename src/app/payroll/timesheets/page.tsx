@@ -19,6 +19,7 @@ import { CarryForwardPanel } from './components/CarryForwardPanel'
 import { AdjustmentLog } from './components/AdjustmentLog'
 import { CommandBar } from '@/components/payroll/CommandBar'
 import { useAuth } from '@/hooks/payroll/useAuth'
+import { useSelectedWeek } from '@/hooks/payroll/useSelectedWeek'
 import type { PayrollEmployee, PayrollTimeEntry } from '@/lib/supabase/types'
 
 export default function TimesheetsPage() {
@@ -33,7 +34,7 @@ function TimesheetsPageContent() {
   const { weeks } = usePayrollWeeks()
   const { isSuperAdmin } = useAuth()
   const searchParams = useSearchParams()
-  const [selectedWeekId, setSelectedWeekId] = useState('')
+  const { selectedWeekId, setSelectedWeekId } = useSelectedWeek()
   const [selectedEmployeeId, setSelectedEmployeeId] = useState<string | null>(null)
   const [selectedCell, setSelectedCell] = useState<SelectedCell | null>(null)
   const [drawerDirty, setDrawerDirty] = useState(false)
@@ -41,7 +42,7 @@ function TimesheetsPageContent() {
   useEffect(() => {
     const w = searchParams.get('week')
     if (w) setSelectedWeekId(w)
-  }, [searchParams])
+  }, [searchParams, setSelectedWeekId])
 
   const {
     allEntries, unallocatedEntries, pendingEntries, corrections,
@@ -295,7 +296,7 @@ function TimesheetsPageContent() {
                       />
                     )}
                     <ManualAddPanel
-                      employees={employees}
+                      selectedEmployee={selectedEmployee}
                       properties={properties}
                       portfolios={portfolios}
                       allProperties={allProperties}
@@ -304,7 +305,7 @@ function TimesheetsPageContent() {
                       spread={spread}
                     />
                     <CarryForwardPanel
-                      employees={employees}
+                      selectedEmployee={selectedEmployee}
                       approvedWeeks={approvedWeeks}
                       properties={properties}
                       addCarryForward={addCarryForward}
@@ -313,6 +314,7 @@ function TimesheetsPageContent() {
                       corrections={corrections}
                       manualEntries={manualEntries as PayrollTimeEntry[]}
                       employees={employees}
+                      defaultEmployeeId={selectedEmployeeId ?? undefined}
                     />
                   </div>
                 )}
@@ -323,6 +325,7 @@ function TimesheetsPageContent() {
                       corrections={corrections}
                       manualEntries={manualEntries as PayrollTimeEntry[]}
                       employees={employees}
+                      defaultEmployeeId={selectedEmployeeId ?? undefined}
                     />
                   </div>
                 )}

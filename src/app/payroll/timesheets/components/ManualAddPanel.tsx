@@ -9,7 +9,7 @@ import { FormSelect, FormField, FormInput, FormTextarea, FormButton, InfoBlock }
 import { MultiPortfolioSpreadPicker } from './InlineDrawer'
 
 interface ManualAddPanelProps {
-  employees: PayrollEmployee[]
+  selectedEmployee: PayrollEmployee | undefined
   properties: PropertyOption[]
   portfolios: PortfolioWithProperties[]
   allProperties: PropertyOption[]
@@ -19,14 +19,13 @@ interface ManualAddPanelProps {
 }
 
 export function ManualAddPanel({
-  employees, properties, portfolios, allProperties, selectedWeek, addEntry, spread,
+  selectedEmployee, properties, portfolios, allProperties, selectedWeek, addEntry, spread,
 }: ManualAddPanelProps) {
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
 
   const [form, setForm] = useState({
-    employeeId: '',
     date: '',
     hours: '',
     propertyId: '',
@@ -47,7 +46,7 @@ export function ManualAddPanel({
 
   const handleAdd = async () => {
     setErr(null)
-    if (!form.employeeId) { setErr('Select an employee'); return }
+    if (!selectedEmployee) { setErr('No employee selected'); return }
     if (!form.date) { setErr('Select a date'); return }
     const hrs = parseFloat(form.hours)
     if (!hrs || hrs <= 0) { setErr('Enter valid hours (> 0)'); return }
@@ -68,7 +67,7 @@ export function ManualAddPanel({
     try {
       if (form.useSpread) {
         await spread({
-          employeeId: form.employeeId,
+          employeeId: selectedEmployee.id,
           date: form.date,
           totalHours: hrs,
           propertyIds: form.spreadPropertyIds,
@@ -77,7 +76,7 @@ export function ManualAddPanel({
         })
       } else {
         await addEntry({
-          employeeId: form.employeeId,
+          employeeId: selectedEmployee.id,
           date: form.date,
           hours: hrs,
           propertyId: form.propertyId,
@@ -85,7 +84,7 @@ export function ManualAddPanel({
           payType: form.payType,
         })
       }
-      setForm({ employeeId: '', date: '', hours: '', propertyId: '', payType: 'regular', useSpread: false, spreadPropertyIds: [], reason: '' })
+      setForm({ date: '', hours: '', propertyId: '', payType: 'regular', useSpread: false, spreadPropertyIds: [], reason: '' })
       setOpen(false)
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Failed to add entry')
@@ -100,7 +99,9 @@ export function ManualAddPanel({
         className="w-full flex items-center justify-between px-5 py-3.5 bg-[var(--bg-section)] hover:bg-[var(--primary)]/5 transition-colors duration-200">
         <div>
           <span className="font-serif text-base text-[var(--primary)]">Add Hours</span>
-          <span className="ml-3 text-xs text-[var(--muted)]">Add missing hours for any employee</span>
+          <span className="ml-3 text-xs text-[var(--muted)]">
+            {selectedEmployee ? `Add missing hours for ${selectedEmployee.name}` : 'Add missing hours'}
+          </span>
         </div>
         {open ? <ChevronUp size={14} className="text-[var(--muted)]" /> : <ChevronDown size={14} className="text-[var(--muted)]" />}
       </button>
@@ -110,11 +111,10 @@ export function ManualAddPanel({
           {err && <InfoBlock variant="error">{err}</InfoBlock>}
 
           <div className="grid grid-cols-2 gap-4 mb-4">
-            <FormField label="Employee" required>
-              <FormSelect value={form.employeeId} onChange={e => set({ employeeId: e.target.value })}>
-                <option value="">— Select —</option>
-                {employees.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-              </FormSelect>
+            <FormField label="Employee">
+              <div className="px-3 py-2 text-sm text-[var(--primary)] bg-[var(--bg-section)] border border-[var(--border)]">
+                {selectedEmployee?.name ?? '—'}
+              </div>
             </FormField>
 
             <FormField label="Date" required>

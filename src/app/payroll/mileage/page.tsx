@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation'
 import { Check, X, RotateCcw, Car, Lock } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import { usePayrollWeeks } from '@/hooks/payroll/usePayrollWeeks'
+import { useSelectedWeek } from '@/hooks/payroll/useSelectedWeek'
 import { usePayrollMileage, type MileageRow } from '@/hooks/payroll/usePayrollMileage'
 import {
   PageHeader, FormButton, FormSelect, FormField, InfoBlock, StatusBadge,
@@ -29,14 +30,15 @@ export default function MileagePage() {
 function MileagePageContent() {
   const { weeks } = usePayrollWeeks()
   const searchParams = useSearchParams()
-  const [selectedWeekId, setSelectedWeekId] = useState('')
+  const { selectedWeekId, setSelectedWeekId, hydrated } = useSelectedWeek()
 
-  // Default to the URL param, else the most recent week.
+  // URL param wins; otherwise keep the persisted selection, falling back to the
+  // most recent week only once nothing is stored.
   useEffect(() => {
     const weekParam = searchParams.get('week')
     if (weekParam) { setSelectedWeekId(weekParam); return }
-    if (!selectedWeekId && weeks.length) setSelectedWeekId(weeks[0].id)
-  }, [searchParams, weeks, selectedWeekId])
+    if (hydrated && !selectedWeekId && weeks.length) setSelectedWeekId(weeks[0].id)
+  }, [searchParams, weeks, selectedWeekId, hydrated, setSelectedWeekId])
 
   const { rows, rate, loading, error, saveReview } = usePayrollMileage(selectedWeekId || undefined)
 

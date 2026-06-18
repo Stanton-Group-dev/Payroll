@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { Plus, BarChart2, ChevronDown, ChevronUp, RefreshCw, Check, Link } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Plus, BarChart2, ChevronDown, ChevronUp, RefreshCw, Check, Link, X } from 'lucide-react'
 import { usePayrollEmployees, useEmployeeRates, useEmployeeDeptSplits } from '@/hooks/payroll/usePayrollEmployees'
 import { useWorkyardReliability } from '@/hooks/payroll/useWorkyardReliability'
 import DataTable, { Column } from '@/components/kit/DataTable'
@@ -203,6 +203,26 @@ export default function EmployeesPage() {
   const { rates } = useEmployeeRates(editing.id ?? null)
   const { splits } = useEmployeeDeptSplits(editing.id ?? null)
 
+  // Load the current (latest effective-dated) splits into the editable table so the
+  // user edits real values in place rather than re-typing them from a read-only box.
+  useEffect(() => {
+    if (!drawerOpen) return
+    // splits can briefly hold the previously-edited employee's rows until the refetch
+    // resolves — ignore them unless they belong to the employee in the drawer.
+    if (!editing.id || splits.length === 0 || splits[0].employee_id !== editing.id) {
+      setDeptSplits([{ department: '', pct: '' }])
+      return
+    }
+    const latestDate = splits[0].effective_date
+    const current = splits.filter(s => s.effective_date === latestDate)
+    setDeptSplits(
+      current.map(s => ({
+        department: s.department,
+        pct: String(+(s.allocation_pct * 100).toFixed(2)),
+      }))
+    )
+  }, [editing.id, splits, drawerOpen])
+
   const displayed = showAll ? employees : employees.filter(e => e.is_active)
 
   const openNew = () => {
@@ -272,6 +292,9 @@ export default function EmployeesPage() {
   }
 
   const tableData = displayed as unknown as (PayrollEmployee & Record<string, unknown>)[]
+
+  const splitTotal = deptSplits.reduce((s, r) => s + (parseFloat(r.pct) || 0), 0)
+  const splitBalanced = Math.abs(splitTotal - 100) < 0.01
 
   return (
     <div className="flex flex-col h-full">
@@ -587,47 +610,78 @@ export default function EmployeesPage() {
         {editing.type === 'salaried' && (
           <>
             <SectionDivider label="Default Dept Splits" />
-            <p className="text-xs text-[var(--muted)] mb-2">Must sum to 100%</p>
-            {editing.id && splits.length > 0 && (
-              <div className="mb-3 p-3 bg-[var(--bg-section)] text-xs">
-                <p className="font-medium text-[var(--muted)] mb-1">Current splits:</p>
-                {splits.map(s => (
-                  <div key={s.id}>{s.department}: {(s.allocation_pct * 100).toFixed(0)}%</div>
-                ))}
-              </div>
-            )}
-            {deptSplits.map((row, i) => (
-              <div key={i} className="flex gap-2 mb-2">
-                <FormSelect
-                  value={row.department}
-                  onChange={e => {
-                    const updated = [...deptSplits]
-                    updated[i] = { ...updated[i], department: e.target.value }
-                    setDeptSplits(updated)
-                  }}
-                  className="flex-1"
-                >
-                  <option value="">— Select department —</option>
-                  {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
-                </FormSelect>
-                <FormInput
-                  type="number" min="0" max="100" step="1"
-                  placeholder="%"
-                  value={row.pct}
-                  onChange={e => {
-                    const updated = [...deptSplits]
-                    updated[i] = { ...updated[i], pct: e.target.value }
-                    setDeptSplits(updated)
-                  }}
-                  className="w-20"
-                />
-              </div>
-            ))}
+            <p className="text-xs text-[var(--muted)] mb-2">
+              How this person&apos;s salary is allocated across departments. Edit the values in place — they must sum to 100%.
+            </p>
+            <div className="border border-[var(--border)] mb-2">
+              <table className="w-full text-sm border-collapse">
+                <thead>
+                  <tr className="bg-[var(--bg-section)] text-[var(--muted)] text-xs">
+                    <th className="px-3 py-2 text-left font-medium">Department</th>
+                    <th className="px-3 py-2 text-right font-medium w-24">%</th>
+                    <th className="w-10" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {deptSplits.map((row, i) => (
+                    <tr key={i} className="border-t border-[var(--divider)]">
+                      <td className="px-2 py-1">
+                        <FormSelect
+                          value={row.department}
+                          onChange={e => {
+                            const updated = [...deptSplits]
+                            updated[i] = { ...updated[i], department: e.target.value }
+                            setDeptSplits(updated)
+                          }}
+                          className="w-full"
+                        >
+                          <option value="">— Select department —</option>
+                          {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+                        </FormSelect>
+                      </td>
+                      <td className="px-2 py-1">
+                        <FormInput
+                          type="number" min="0" max="100" step="1"
+                          placeholder="%"
+                          value={row.pct}
+                          onChange={e => {
+                            const updated = [...deptSplits]
+                            updated[i] = { ...updated[i], pct: e.target.value }
+                            setDeptSplits(updated)
+                          }}
+                          className="w-full text-right"
+                        />
+                      </td>
+                      <td className="px-2 py-1 text-center">
+                        <button
+                          type="button"
+                          onClick={() => setDeptSplits(p => p.length > 1 ? p.filter((_, idx) => idx !== i) : [{ department: '', pct: '' }])}
+                          className="text-[var(--muted)] hover:text-[var(--error)]"
+                          title="Remove department"
+                        >
+                          <X size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t border-[var(--divider)] text-xs font-medium">
+                    <td className="px-3 py-2 text-right text-[var(--muted)]">Total</td>
+                    <td className={`px-3 py-2 text-right ${splitBalanced ? 'text-[var(--success)]' : 'text-[var(--error)]'}`}>
+                      {+splitTotal.toFixed(2)}%
+                    </td>
+                    <td />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
             <button
+              type="button"
               onClick={() => setDeptSplits(p => [...p, { department: '', pct: '' }])}
               className="text-xs text-[var(--primary)] hover:underline mb-4"
             >
-              + Add row
+              + Add department
             </button>
           </>
         )}

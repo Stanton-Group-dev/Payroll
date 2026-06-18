@@ -3,6 +3,7 @@
 import { useState, useCallback } from 'react'
 import { Upload, AlertTriangle, CheckCircle2, X, RefreshCw } from 'lucide-react'
 import { usePayrollWeeks } from '@/hooks/payroll/usePayrollWeeks'
+import { useSelectedWeek } from '@/hooks/payroll/useSelectedWeek'
 import { usePayrollEmployees } from '@/hooks/payroll/usePayrollEmployees'
 import { useProperties } from '@/hooks/payroll/useProperties'
 import { PageHeader, FormButton, FormSelect, FormField, InfoBlock } from '@/components/form'
@@ -30,7 +31,7 @@ export default function ImportPage() {
   const { properties: propertyList } = useProperties(true)
 
   const [importMode, setImportMode] = useState<'api' | 'csv'>('api')
-  const [selectedWeekId, setSelectedWeekId] = useState('')
+  const { selectedWeekId, setSelectedWeekId } = useSelectedWeek()
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<MatchedRow[]>([])
   const [parseErrors, setParseErrors] = useState<string[]>([])

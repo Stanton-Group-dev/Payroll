@@ -4,6 +4,7 @@ import { Suspense, useState, useEffect } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { Plus, Trash2, Lock } from 'lucide-react'
 import { usePayrollWeeks } from '@/hooks/payroll/usePayrollWeeks'
+import { useSelectedWeek } from '@/hooks/payroll/useSelectedWeek'
 import { usePayrollAdjustments } from '@/hooks/payroll/usePayrollAdjustments'
 import { usePayrollEmployees } from '@/hooks/payroll/usePayrollEmployees'
 import {
@@ -43,12 +44,12 @@ export default function AdjustmentsPage() {
 function AdjustmentsPageContent() {
   const { weeks } = usePayrollWeeks()
   const searchParams = useSearchParams()
-  const [selectedWeekId, setSelectedWeekId] = useState('')
+  const { selectedWeekId, setSelectedWeekId } = useSelectedWeek()
 
   useEffect(() => {
     const weekParam = searchParams.get('week')
     if (weekParam) setSelectedWeekId(weekParam)
-  }, [searchParams])
+  }, [searchParams, setSelectedWeekId])
 
   const { adjustments, loading, addAdjustment, deleteAdjustment, seedPhoneReimbursements } = usePayrollAdjustments(selectedWeekId || null)
   const { employees } = usePayrollEmployees(false)

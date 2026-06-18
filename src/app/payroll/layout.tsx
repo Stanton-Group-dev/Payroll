@@ -27,6 +27,7 @@ import {
   FileText,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/payroll/useAuth'
+import { SelectedWeekProvider } from '@/hooks/payroll/useSelectedWeek'
 
 const navItems = [
   { href: '/payroll', label: 'Week Dashboard', icon: BarChart2, exact: true },
@@ -67,6 +68,7 @@ export default function PayrollLayout({ children }: { children: React.ReactNode 
   }
 
   return (
+    <SelectedWeekProvider>
     <div className="flex min-h-screen bg-[var(--paper)]">
       {/* Sidebar */}
       <aside className="w-56 bg-[var(--primary)] flex flex-col shrink-0">
@@ -207,5 +209,6 @@ export default function PayrollLayout({ children }: { children: React.ReactNode 
         {children}
       </main>
     </div>
+    </SelectedWeekProvider>
   )
 }
