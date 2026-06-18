@@ -31,7 +31,8 @@ interface WeeklyPropertyCostRow {
     total_units: number | null
     portfolio_id: string | null
     billing_llc: string | null
-    portfolio: { owner_llc: string | null } | null
+    include_in_invoicing: boolean | null
+    portfolio: { owner_llc: string | null; include_in_invoicing: boolean | null } | null
   } | null
 }
 
@@ -51,7 +52,7 @@ export function usePayrollWeekInvoices(weekId: string) {
       supabase.from('payroll_weeks').select('*').eq('id', weekId).single(),
       supabase.from('payroll_weekly_property_costs').select(`
         payroll_week_id, property_id, labor_cost, spread_cost, total_cost,
-        property:properties(id, code, name, total_units, portfolio_id, billing_llc, portfolio:portfolios(owner_llc))
+        property:properties(id, code, name, total_units, portfolio_id, billing_llc, include_in_invoicing, portfolio:portfolios(owner_llc, include_in_invoicing))
       `).eq('payroll_week_id', weekId),
     ])
     if (weekRes.error) { setError(weekRes.error.message); setLoading(false); return }
@@ -62,6 +63,10 @@ export function usePayrollWeekInvoices(weekId: string) {
       const typedRow = row as unknown as WeeklyPropertyCostRow
       const prop = typedRow.property
       if (!prop) continue
+      // Skip properties (or whole portfolios) turned off in Invoicing settings.
+      // Absence of the flag means included (default true).
+      if (prop.include_in_invoicing === false) continue
+      if (prop.portfolio?.include_in_invoicing === false) continue
       const labor = typedRow.labor_cost ?? 0
       const spread = typedRow.spread_cost ?? 0
       const mgmt_fee = typedRow.total_cost - labor - spread

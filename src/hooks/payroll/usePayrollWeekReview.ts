@@ -21,6 +21,7 @@ export function usePayrollWeekReview(weekId: string) {
   const [adjustments, setAdjustments] = useState<PayrollAdjustment[]>([])
   const [feeConfigs, setFeeConfigs] = useState<PayrollManagementFeeConfig[]>([])
   const [properties, setProperties] = useState<Property[]>([])
+  const [excludedPropertyIds, setExcludedPropertyIds] = useState<Set<string>>(new Set())
   const [employeeRates, setEmployeeRates] = useState<PayrollEmployeeRate[]>([])
   const [mileageReimbursements, setMileageReimbursements] = useState<PayrollMileageReimbursement[]>([])
   const [approved, setApproved] = useState(false)
@@ -33,13 +34,14 @@ export function usePayrollWeekReview(weekId: string) {
     setLoading(true)
     setError(null)
     const supabase = createClient()
-    const [weekRes, empRes, entRes, adjRes, feeRes, propRes, approvalRes, ratesRes, mileageRes] = await Promise.all([
+    const [weekRes, empRes, entRes, adjRes, feeRes, propRes, portRes, approvalRes, ratesRes, mileageRes] = await Promise.all([
       supabase.from('payroll_weeks').select('*').eq('id', weekId).single(),
       supabase.from('payroll_employees').select('*').eq('is_active', true),
       supabase.from('payroll_time_entries').select('*').eq('payroll_week_id', weekId).eq('is_flagged', false).eq('is_active', true),
       supabase.from('payroll_adjustments').select('*').eq('payroll_week_id', weekId).eq('is_active', true),
       supabase.from('payroll_management_fee_config').select('*').order('effective_date', { ascending: false }),
-      supabase.from('properties').select('id, appfolio_property_id, code, name, total_units, portfolio_id, address, billing_llc, is_active').eq('is_active', true),
+      supabase.from('properties').select('id, appfolio_property_id, code, name, total_units, portfolio_id, address, billing_llc, is_active, include_in_invoicing').eq('is_active', true),
+      supabase.from('portfolios').select('id, include_in_invoicing'),
       supabase.from('payroll_approvals').select('*').eq('payroll_week_id', weekId).eq('stage', 'payroll'),
       supabase.from('payroll_employee_rates').select('*'),
       supabase.from('payroll_mileage_reimbursements').select('*').eq('payroll_week_id', weekId),
@@ -50,7 +52,19 @@ export function usePayrollWeekReview(weekId: string) {
     setEntries(entRes.data ?? [])
     setAdjustments(adjRes.data ?? [])
     setFeeConfigs(feeRes.data ?? [])
-    setProperties(propRes.data ?? [])
+    const props = propRes.data ?? []
+    setProperties(props)
+    // Properties excluded from invoicing: own flag off, or their portfolio's flag off.
+    // (Absence of a flag means included — default true.) Used to mark/hide rows in the
+    // Property Cost Summary so the review matches what will actually be billed.
+    const excludedPortfolios = new Set(
+      (portRes.data ?? []).filter(p => p.include_in_invoicing === false).map(p => p.id),
+    )
+    setExcludedPropertyIds(new Set(
+      props
+        .filter(p => p.include_in_invoicing === false || (p.portfolio_id != null && excludedPortfolios.has(p.portfolio_id)))
+        .map(p => p.id),
+    ))
     setEmployeeRates(ratesRes.data ?? [])
     setMileageReimbursements(mileageRes.data ?? [])
     setApproved((approvalRes.data?.length ?? 0) > 0)
@@ -100,7 +114,7 @@ export function usePayrollWeekReview(weekId: string) {
 
   return {
     week, employees, entries, adjustments, feeConfigs, properties, employeeRates,
-    mileageReimbursements,
+    mileageReimbursements, excludedPropertyIds,
     approved, pendingCount, loading, error, approving,
     approvePayroll, refetch: load,
   }

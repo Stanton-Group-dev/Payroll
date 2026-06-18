@@ -25,6 +25,7 @@ import {
   CircleDollarSign,
   Laptop,
   FileText,
+  SlidersHorizontal,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/payroll/useAuth'
 import { SelectedWeekProvider } from '@/hooks/payroll/useSelectedWeek'
@@ -52,6 +53,7 @@ const adminItems = [
   { href: '/payroll/admin/mgmt-fee', label: 'Management Fee', icon: Settings },
   { href: '/payroll/admin/external-projects', label: 'External Projects', icon: Building2 },
   { href: '/payroll/admin/portfolios', label: 'Portfolios', icon: Briefcase },
+  { href: '/payroll/admin/invoicing', label: 'Invoicing', icon: SlidersHorizontal },
   { href: '/payroll/admin/users', label: 'Users & Roles', icon: Users },
   { href: '/payroll/admin/thresholds', label: 'Budget Thresholds', icon: Target },
   { href: '/payroll/admin/travel-premiums', label: 'Travel Premiums', icon: Car },

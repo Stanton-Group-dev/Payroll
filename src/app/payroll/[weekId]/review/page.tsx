@@ -39,7 +39,7 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
   const { weekId } = use(params)
   const {
     week, employees, entries, adjustments, feeConfigs, properties, employeeRates,
-    mileageReimbursements,
+    mileageReimbursements, excludedPropertyIds,
     approved, pendingCount, loading, approving, approvePayroll,
   } = usePayrollWeekReview(weekId)
 
@@ -70,6 +70,21 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
       return numeric ? dir * (Number(av) - Number(bv)) : dir * String(av).localeCompare(String(bv))
     })
   }, [result, empSort])
+
+  // Property cost rows that carry a cost this week, split by whether they'll be billed.
+  // Excluded properties (≤1 unit, or turned off in Invoicing settings) are dropped from
+  // the summary so the review matches what invoice generation will actually produce.
+  const billableCosts = useMemo(
+    () => (result?.property_costs ?? []).filter(pc => pc.total_cost > 0),
+    [result],
+  )
+  const includedCosts = useMemo(
+    () => billableCosts
+      .filter(pc => !excludedPropertyIds.has(pc.property_id))
+      .sort((a, b) => b.total_cost - a.total_cost),
+    [billableCosts, excludedPropertyIds],
+  )
+  const excludedCostCount = billableCosts.length - includedCosts.length
 
   const timesheetApproved = week?.status !== 'draft'
   const canApprovePayroll = timesheetApproved && !approved && result !== null && pendingCount === 0
@@ -218,10 +233,7 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
                     </tr>
                   </thead>
                   <tbody>
-                    {result.property_costs
-                      .filter(pc => pc.total_cost > 0)
-                      .sort((a, b) => b.total_cost - a.total_cost)
-                      .map((pc, i) => (
+                    {includedCosts.map((pc, i) => (
                       <tr key={pc.property_id} className={`border-b border-[var(--divider)] ${i % 2 === 0 ? 'bg-white' : 'bg-[var(--bg-section)]'}`}>
                         <td className="px-3 py-2">
                           <span className="font-mono text-xs text-[var(--muted)] mr-1">{pc.property_code}</span>
@@ -239,6 +251,14 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
                   </tbody>
                 </table>
               </div>
+              {excludedCostCount > 0 && (
+                <p className="text-xs text-[var(--muted)] mt-2">
+                  {excludedCostCount} {excludedCostCount === 1 ? 'property with cost is' : 'properties with cost are'} excluded from invoicing
+                  (≤1 unit or turned off in{' '}
+                  <a href="/payroll/admin/invoicing" className="underline hover:text-[var(--primary)]">Invoicing settings</a>)
+                  and won&apos;t appear on invoices.
+                </p>
+              )}
             </div>
 
             {/* Approve */}

@@ -348,12 +348,18 @@ export interface Property {
   portfolio_id: string | null
   billing_llc: string | null
   is_active: boolean
+  /** When false, skipped during invoice generation. Optional in the type because not
+   *  every query selects it; absence is treated as included. See migration
+   *  20260617_02_invoicing_inclusion_flags. */
+  include_in_invoicing?: boolean
 }
 
 export interface Portfolio {
   id: string
   name: string
   is_active: boolean
+  /** When false, every property in this portfolio is skipped during invoice generation. */
+  include_in_invoicing?: boolean
 }
 
 export interface PayrollSpreadEvent {
