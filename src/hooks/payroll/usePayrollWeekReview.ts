@@ -25,6 +25,7 @@ export function usePayrollWeekReview(weekId: string) {
   const [employeeRates, setEmployeeRates] = useState<PayrollEmployeeRate[]>([])
   const [mileageReimbursements, setMileageReimbursements] = useState<PayrollMileageReimbursement[]>([])
   const [heldEmployeeIds, setHeldEmployeeIds] = useState<Set<string>>(new Set())
+  const [waivedEmployeeIds, setWaivedEmployeeIds] = useState<Set<string>>(new Set())
   const [approved, setApproved] = useState(false)
   const [pendingCount, setPendingCount] = useState(0)
   const [loading, setLoading] = useState(true)
@@ -46,17 +47,29 @@ export function usePayrollWeekReview(weekId: string) {
       supabase.from('payroll_approvals').select('*').eq('payroll_week_id', weekId).eq('stage', 'payroll'),
       supabase.from('payroll_employee_rates').select('*'),
       supabase.from('payroll_mileage_reimbursements').select('*').eq('payroll_week_id', weekId),
-      supabase.from('payroll_employee_holds').select('employee_id').eq('payroll_week_id', weekId).eq('status', 'held'),
+      supabase.from('payroll_employee_holds').select('employee_id, status').eq('payroll_week_id', weekId).in('status', ['held', 'waived']),
     ])
     if (weekRes.error) { setError(weekRes.error.message); setLoading(false); return }
     setWeek(weekRes.data)
     // Held employees are pulled from the run entirely — excluded here so the calc
     // drops both their pay and their property labor cost (you can't bill labor you
     // didn't pay). They reappear once their hold is released.
-    const held = new Set((holdsRes.data ?? []).map(h => h.employee_id))
+    const holdRows = holdsRes.data ?? []
+    const held = new Set(holdRows.filter(h => h.status === 'held').map(h => h.employee_id))
+    // Waived employees stay in the run (paid for allocated work) but their unallocated
+    // (no-property) hours are dropped below so they're neither paid nor billed.
+    const waived = new Set(holdRows.filter(h => h.status === 'waived').map(h => h.employee_id))
     setHeldEmployeeIds(held)
+    setWaivedEmployeeIds(waived)
     setEmployees((empRes.data ?? []).filter(e => !held.has(e.id)))
-    setEntries(entRes.data ?? [])
+    setEntries(
+      (entRes.data ?? []).filter(
+        e =>
+          e.property_id != null ||
+          ((e.regular_hours ?? 0) + (e.ot_hours ?? 0)) <= 0 ||
+          !waived.has(e.employee_id),
+      ),
+    )
     setAdjustments(adjRes.data ?? [])
     setFeeConfigs(feeRes.data ?? [])
     const props = propRes.data ?? []
@@ -121,7 +134,7 @@ export function usePayrollWeekReview(weekId: string) {
 
   return {
     week, employees, entries, adjustments, feeConfigs, properties, employeeRates,
-    mileageReimbursements, excludedPropertyIds, heldEmployeeIds,
+    mileageReimbursements, excludedPropertyIds, heldEmployeeIds, waivedEmployeeIds,
     approved, pendingCount, loading, error, approving,
     approvePayroll, refetch: load,
   }

@@ -182,6 +182,63 @@ export async function applyUnallocatedHolds(
   return { twilioLive: isTwilioLive(), threshold, held }
 }
 
+/**
+ * Waive (write off) just the unallocated hours for one employee this week. Unlike a
+ * hold, the employee is NOT pulled from the run — they're still paid for their
+ * allocated work; only the no-property hours are dropped from pay (they were never
+ * billed to a property anyway). No SMS is sent. Idempotent on (week, employee);
+ * reversible via {@link unwaiveUnallocated}. Records a snapshot of the hours written
+ * off for the audit trail.
+ */
+export async function waiveUnallocated(
+  admin: SupabaseClient,
+  opts: { weekId: string; employeeId: string; userId: string | null },
+): Promise<{ employee_id: string; unallocated_hours: number }> {
+  // Snapshot the hours being written off (threshold 0 — waive any amount, not just
+  // those over the hold threshold the panel surfaces).
+  const all = await detectUnallocatedEmployees(admin, opts.weekId, 0)
+  const hours = all.find(e => e.employee_id === opts.employeeId)?.unallocated_hours ?? 0
+
+  const { error } = await admin
+    .from('payroll_employee_holds')
+    .upsert(
+      {
+        payroll_week_id: opts.weekId,
+        employee_id: opts.employeeId,
+        reason: 'unallocated_hours',
+        unallocated_hours: hours,
+        status: 'waived',
+        held_by: opts.userId,
+        held_at: new Date().toISOString(),
+        // A waive carries no resolution flow — clear any stale release fields.
+        resolution_note: null,
+        released_by: null,
+        released_at: null,
+      },
+      { onConflict: 'payroll_week_id,employee_id' },
+    )
+  if (error) throw new Error(error.message)
+  return { employee_id: opts.employeeId, unallocated_hours: hours }
+}
+
+/**
+ * Reverse a waive: pay the employee's unallocated hours again. Deletes the waive row
+ * (only when it's actually 'waived', so a real hold/release is never removed by
+ * mistake).
+ */
+export async function unwaiveUnallocated(
+  admin: SupabaseClient,
+  opts: { weekId: string; employeeId: string },
+): Promise<void> {
+  const { error } = await admin
+    .from('payroll_employee_holds')
+    .delete()
+    .eq('payroll_week_id', opts.weekId)
+    .eq('employee_id', opts.employeeId)
+    .eq('status', 'waived')
+  if (error) throw new Error(error.message)
+}
+
 /** Release a hold once the employee has come in with a written reason. */
 export async function releaseHold(
   admin: SupabaseClient,

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { AlertTriangle, MessageSquare, UserX } from 'lucide-react'
+import { AlertTriangle, MessageSquare, UserX, Scissors } from 'lucide-react'
 import { useUnallocatedHolds } from '@/hooks/payroll/useUnallocatedHolds'
 import { FormButton, FormTextarea, InfoBlock } from '@/components/form'
 import type { PayrollEmployeeHold, PayrollEmployee } from '@/lib/supabase/types'
@@ -22,7 +22,7 @@ const NOTIF_LABEL: Record<string, string> = {
  * reflects who's currently excluded.
  */
 export function UnallocatedHoldsPanel({ weekId, onChange }: { weekId: string; onChange?: () => void }) {
-  const { state, loading, busy, error, applyHolds, releaseHold } = useUnallocatedHolds(weekId, onChange)
+  const { state, loading, busy, error, applyHolds, releaseHold, waive, unwaive } = useUnallocatedHolds(weekId, onChange)
   const [releasingId, setReleasingId] = useState<string | null>(null)
   const [note, setNote] = useState('')
 
@@ -30,10 +30,12 @@ export function UnallocatedHoldsPanel({ weekId, onChange }: { weekId: string; on
   if (!state) return null
 
   const activeHolds = state.holds.filter(h => h.status === 'held')
+  const waivedHolds = state.holds.filter(h => h.status === 'waived')
   const releasedHolds = state.holds.filter(h => h.status === 'released')
   const heldIds = new Set(activeHolds.map(h => h.employee_id))
-  // Unallocated employees not yet held — the ones the action will act on.
-  const pending = state.unallocated.filter(u => !heldIds.has(u.employee_id))
+  const waivedIds = new Set(waivedHolds.map(h => h.employee_id))
+  // Unallocated employees not yet held or waived — the ones the actions will act on.
+  const pending = state.unallocated.filter(u => !heldIds.has(u.employee_id) && !waivedIds.has(u.employee_id))
 
   const empName = (h: PayrollEmployeeHold) =>
     (h.employee as PayrollEmployee | undefined)?.name ?? 'Employee'
@@ -79,6 +81,16 @@ export function UnallocatedHoldsPanel({ weekId, onChange }: { weekId: string; on
                   <span className="flex items-center gap-3">
                     <span className="font-medium text-[var(--warning)]">{u.unallocated_hours}h unallocated</span>
                     {!u.phone && <span className="text-xs text-[var(--muted)]">no phone</span>}
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => waive(u.employee_id)}
+                      title="Pay this employee for their allocated work but drop the unallocated hours from pay. No text is sent."
+                      className="inline-flex items-center gap-1 text-xs text-[var(--primary)] hover:underline disabled:opacity-50"
+                    >
+                      <Scissors size={12} />
+                      Don&apos;t pay these hours
+                    </button>
                   </span>
                 </li>
               ))}
@@ -90,10 +102,12 @@ export function UnallocatedHoldsPanel({ weekId, onChange }: { weekId: string; on
               </span>
             </FormButton>
             <p className="text-xs text-[var(--muted)]">
-              Pulls each employee from this week&apos;s pay run and texts them to come in with a written reason.
+              <strong>Hold</strong> pulls each employee from this week&apos;s pay run entirely and texts them to come in with a
+              written reason. <strong>Don&apos;t pay these hours</strong> keeps paying the employee for their allocated work and
+              only drops the unallocated hours — no text, reversible.
             </p>
           </div>
-        ) : activeHolds.length === 0 ? (
+        ) : activeHolds.length === 0 && waivedHolds.length === 0 ? (
           <p className="text-sm text-[var(--success)]">✓ No unallocated hours above the threshold this week.</p>
         ) : null}
 
@@ -134,6 +148,31 @@ export function UnallocatedHoldsPanel({ weekId, onChange }: { weekId: string; on
                       Record reason &amp; release
                     </button>
                   )}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Unallocated hours written off — employee still paid for allocated work */}
+        {waivedHolds.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-sm font-medium text-[var(--ink)]">Unallocated hours not paid (still paid for allocated work)</p>
+            <ul className="text-sm divide-y divide-[var(--divider)] border border-[var(--divider)]">
+              {waivedHolds.map(h => (
+                <li key={h.id} className="flex items-center justify-between px-3 py-2">
+                  <span className="font-medium">{empName(h)}</span>
+                  <span className="flex items-center gap-3">
+                    <span className="text-xs text-[var(--muted)]">{h.unallocated_hours}h dropped</span>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => unwaive(h.employee_id)}
+                      className="text-xs text-[var(--primary)] hover:underline disabled:opacity-50"
+                    >
+                      Pay anyway
+                    </button>
+                  </span>
                 </li>
               ))}
             </ul>

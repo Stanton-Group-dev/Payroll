@@ -68,6 +68,53 @@ export function useUnallocatedHolds(weekId: string, onChange?: () => void) {
     }
   }, [weekId, load, onChange])
 
+  /** Write off just this employee's unallocated hours — they're still paid for
+   *  allocated work, no text is sent. Reversible via {@link unwaive}. */
+  const waive = useCallback(async (employeeId: string) => {
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/payroll/holds', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'waive', weekId, employeeId }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? 'Failed to waive hours')
+      await load()
+      onChange?.()
+      return true
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to waive hours')
+      return false
+    } finally {
+      setBusy(false)
+    }
+  }, [weekId, load, onChange])
+
+  /** Reverse a waive — pay the employee's unallocated hours again. */
+  const unwaive = useCallback(async (employeeId: string) => {
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await fetch('/api/payroll/holds', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'unwaive', weekId, employeeId }),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error ?? 'Failed to restore pay')
+      await load()
+      onChange?.()
+      return true
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to restore pay')
+      return false
+    } finally {
+      setBusy(false)
+    }
+  }, [weekId, load, onChange])
+
   const releaseHold = useCallback(async (holdId: string, resolutionNote: string) => {
     setBusy(true)
     setError(null)
@@ -90,5 +137,5 @@ export function useUnallocatedHolds(weekId: string, onChange?: () => void) {
     }
   }, [load, onChange])
 
-  return { state, loading, busy, error, refetch: load, applyHolds, releaseHold }
+  return { state, loading, busy, error, refetch: load, applyHolds, releaseHold, waive, unwaive }
 }

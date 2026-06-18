@@ -222,7 +222,10 @@ export interface PayrollDeptSplitOverride {
   updated_at: string
 }
 
-export type HoldStatus = 'held' | 'released'
+// 'held'   : whole employee pulled from the run (no pay, no billing) until released.
+// 'waived' : only the employee's unallocated hours are written off — still paid for
+//            allocated work, no notification, reversible.
+export type HoldStatus = 'held' | 'released' | 'waived'
 export type HoldReason = 'unallocated_hours'
 export type NotificationChannel = 'sms' | 'email'
 export type NotificationStatus = 'queued' | 'sent' | 'dry_run' | 'skipped' | 'failed'

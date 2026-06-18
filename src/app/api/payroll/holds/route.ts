@@ -6,6 +6,8 @@ import {
   detectUnallocatedEmployees,
   applyUnallocatedHolds,
   releaseHold,
+  waiveUnallocated,
+  unwaiveUnallocated,
   UNALLOCATED_HOLD_THRESHOLD_HOURS,
 } from '@/lib/payroll/unallocatedHolds'
 
@@ -67,13 +69,15 @@ export async function GET(req: NextRequest) {
  * POST /api/payroll/holds
  *   { weekId, action: 'apply', thresholdHours? }      → hold + notify everyone over threshold
  *   { holdId, action: 'release', resolutionNote }     → release one hold with the written reason
+ *   { weekId, employeeId, action: 'waive' }           → write off one employee's unallocated hours (still pay allocated)
+ *   { weekId, employeeId, action: 'unwaive' }         → reverse a waive (pay the unallocated hours again)
  */
 export async function POST(req: NextRequest) {
   const auth = await authorize()
   if ('error' in auth) return auth.error
   const { admin, userId } = auth
 
-  let body: { weekId?: string; holdId?: string; action?: string; resolutionNote?: string; thresholdHours?: number }
+  let body: { weekId?: string; holdId?: string; employeeId?: string; action?: string; resolutionNote?: string; thresholdHours?: number }
   try { body = await req.json() } catch { return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 }) }
 
   try {
@@ -90,6 +94,16 @@ export async function POST(req: NextRequest) {
       if (!body.holdId) return NextResponse.json({ error: 'holdId required' }, { status: 400 })
       const hold = await releaseHold(admin, { holdId: body.holdId, userId, resolutionNote: body.resolutionNote ?? '' })
       return NextResponse.json({ ok: true, hold })
+    }
+    if (body.action === 'waive') {
+      if (!body.weekId || !body.employeeId) return NextResponse.json({ error: 'weekId and employeeId required' }, { status: 400 })
+      const result = await waiveUnallocated(admin, { weekId: body.weekId, employeeId: body.employeeId, userId })
+      return NextResponse.json({ ok: true, ...result })
+    }
+    if (body.action === 'unwaive') {
+      if (!body.weekId || !body.employeeId) return NextResponse.json({ error: 'weekId and employeeId required' }, { status: 400 })
+      await unwaiveUnallocated(admin, { weekId: body.weekId, employeeId: body.employeeId })
+      return NextResponse.json({ ok: true })
     }
     return NextResponse.json({ error: 'Unknown action' }, { status: 400 })
   } catch (e: unknown) {
