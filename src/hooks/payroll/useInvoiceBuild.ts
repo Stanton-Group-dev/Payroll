@@ -144,6 +144,13 @@ export function useInvoiceBuild(weekId: string) {
   }, [review.loading, review.employees, review.entries, review.adjustments, review.feeConfigs,
       review.properties, review.mileageReimbursements, review.excludedPropertyIds, rows, ownerByPortfolio, fullAddrById])
 
+  // Remote employees run on a separate payroll (pay_group = 'remote') and are
+  // excluded from the on-site hourly summary on the statement.
+  const remoteEmployeeIds = useMemo(
+    () => new Set(review.employees.filter(e => e.pay_group === 'remote').map(e => e.id)),
+    [review.employees],
+  )
+
   return {
     week: review.week,
     loading: review.loading,
@@ -152,5 +159,6 @@ export function useInvoiceBuild(weekId: string) {
     wyError,
     invoices,
     employeeSummaries,
+    remoteEmployeeIds,
   }
 }
