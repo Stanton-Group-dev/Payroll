@@ -2,9 +2,10 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { use } from 'react'
-import { Printer, ArrowLeft, ChevronDown, ChevronRight } from 'lucide-react'
+import { Download, Loader2, ArrowLeft, ChevronDown, ChevronRight } from 'lucide-react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+import { downloadPdf } from '@/lib/payroll/downloadPdf'
 import { formatCurrency } from '@/lib/payroll/calculations'
 import { buildActivityHoursByCode, splitLaborByActivity } from '@/lib/payroll/cost-code-breakdown'
 import type { WorkyardRow } from '@/lib/payroll/csv-parser'
@@ -45,6 +46,18 @@ export default function InvoicePrintPage({ params }: { params: Promise<{ weekId:
   const [wyRows, setWyRows] = useState<WorkyardRow[]>([])
   // Collapsed property line ids (default: all expanded). Print always shows sub-lines.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+  const [saving, setSaving] = useState(false)
+
+  const handleDownload = async () => {
+    setSaving(true)
+    try {
+      await downloadPdf(`/payroll/${weekId}/invoices/${invoiceId}/print`, `invoice-${invoiceId}`)
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Could not generate PDF')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   useEffect(() => {
     const load = async () => {
@@ -99,11 +112,12 @@ export default function InvoicePrintPage({ params }: { params: Promise<{ weekId:
           Back to Invoices
         </Link>
         <button
-          onClick={() => window.print()}
-          className="ml-auto flex items-center gap-2 px-4 py-2 bg-[var(--primary)] text-white text-sm hover:bg-[var(--primary)]/90 transition-colors"
+          onClick={handleDownload}
+          disabled={saving}
+          className="ml-auto flex items-center gap-2 px-4 py-2 bg-[var(--primary)] text-white text-sm hover:bg-[var(--primary)]/90 transition-colors disabled:opacity-60"
         >
-          <Printer size={14} />
-          Print Invoice
+          {saving ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+          {saving ? 'Generating…' : 'Download PDF'}
         </button>
       </div>
 

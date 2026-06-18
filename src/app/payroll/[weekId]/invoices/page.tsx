@@ -1,7 +1,7 @@
 'use client'
 
 import { use } from 'react'
-import { Plus, CheckCircle2, FileText, Printer } from 'lucide-react'
+import { Plus, CheckCircle2, FileText, Download } from 'lucide-react'
 import Link from 'next/link'
 import { usePayrollWeekInvoices } from '@/hooks/payroll/usePayrollWeekInvoices'
 import { usePayrollInvoices } from '@/hooks/payroll/usePayrollInvoices'
@@ -97,9 +97,9 @@ export default function InvoicesPage({ params }: { params: Promise<{ weekId: str
                       href={`/payroll/${weekId}/invoices/${inv.id}/print`}
                       target="_blank"
                       className="flex items-center gap-1 text-xs text-[var(--muted)] hover:text-[var(--primary)] transition-colors"
-                      title="Print invoice"
+                      title="Download invoice PDF"
                     >
-                      <Printer size={13} />
+                      <Download size={13} />
                     </Link>
                   </div>
                 </div>

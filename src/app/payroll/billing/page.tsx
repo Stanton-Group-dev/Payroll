@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import {
-  FileSpreadsheet, Printer, ChevronRight, ChevronDown, FileText, Plus, ArrowRight,
+  FileSpreadsheet, Download, ChevronRight, ChevronDown, FileText, Plus, ArrowRight,
 } from 'lucide-react'
 import { useBillingLedger } from '@/hooks/payroll/useBillingLedger'
 import { buildBillingLedger, UNASSIGNED_LLC, type BillingFilters } from '@/lib/payroll/billing'
@@ -212,10 +212,10 @@ export default function BillingPage() {
                             <Link
                               href={`/payroll/billing/${encodeURIComponent(g.owner_llc)}/print${rangeLabel ? `?from=${from}&to=${to}` : ''}`}
                               target="_blank"
-                              title={`Print statement for ${g.owner_llc}`}
+                              title={`Download statement PDF for ${g.owner_llc}`}
                               className="inline-flex text-[var(--muted)] hover:text-[var(--primary)]"
                             >
-                              <Printer size={14} />
+                              <Download size={14} />
                             </Link>
                           )}
                         </td>

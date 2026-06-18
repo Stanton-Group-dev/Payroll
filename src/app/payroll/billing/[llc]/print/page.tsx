@@ -1,10 +1,11 @@
 'use client'
 
 import { use, useEffect, useState } from 'react'
-import { Printer, ArrowLeft } from 'lucide-react'
+import { Download, Loader2, ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { formatCurrency } from '@/lib/payroll/calculations'
+import { downloadPdf } from '@/lib/payroll/downloadPdf'
 
 interface LineItem {
   id: string
@@ -31,6 +32,18 @@ export default function LLCStatementPrintPage({ params }: { params: Promise<{ ll
   const ownerLlc = decodeURIComponent(llc)
   const [invoices, setInvoices] = useState<InvoiceRow[]>([])
   const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+
+  const handleDownload = async () => {
+    setSaving(true)
+    try {
+      await downloadPdf(window.location.pathname + window.location.search, `statement-${ownerLlc}`)
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Could not generate PDF')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   useEffect(() => {
     const load = async () => {
@@ -72,10 +85,12 @@ export default function LLCStatementPrintPage({ params }: { params: Promise<{ ll
           <ArrowLeft size={14} /> Back to Invoices
         </Link>
         <button
-          onClick={() => window.print()}
-          className="ml-auto flex items-center gap-2 px-4 py-2 bg-[var(--primary)] text-white text-sm hover:bg-[var(--primary)]/90 transition-colors"
+          onClick={handleDownload}
+          disabled={saving}
+          className="ml-auto flex items-center gap-2 px-4 py-2 bg-[var(--primary)] text-white text-sm hover:bg-[var(--primary)]/90 transition-colors disabled:opacity-60"
         >
-          <Printer size={14} /> Print / Save PDF
+          {saving ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+          {saving ? 'Generating…' : 'Download PDF'}
         </button>
       </div>
 

@@ -5,15 +5,28 @@
  * Billing math lives in useInvoiceBuild (shared with the printable statement).
  */
 
-import { use } from 'react'
+import { use, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, Printer, FileText } from 'lucide-react'
+import { ArrowLeft, Download, Loader2, FileText } from 'lucide-react'
 import { useInvoiceBuild } from '@/hooks/payroll/useInvoiceBuild'
 import { formatCurrency } from '@/lib/payroll/calculations'
+import { downloadPdf } from '@/lib/payroll/downloadPdf'
 
 export default function InvoicePreviewPage({ params }: { params: Promise<{ weekId: string }> }) {
   const { weekId } = use(params)
   const { week, loading, error, wyLoading, wyError, invoices } = useInvoiceBuild(weekId)
+  const [saving, setSaving] = useState(false)
+
+  const handleDownload = async () => {
+    setSaving(true)
+    try {
+      await downloadPdf(`/payroll/${weekId}/invoices/preview`, `invoice-preview-${week?.week_start ?? weekId}`)
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Could not generate PDF')
+    } finally {
+      setSaving(false)
+    }
+  }
 
   if (loading) return <div className="p-8 text-[var(--muted)]">Loading payroll…</div>
   if (error) return <div className="p-8 text-[var(--error)]">Failed to load: {error}</div>
@@ -29,8 +42,9 @@ export default function InvoicePreviewPage({ params }: { params: Promise<{ weekI
         <Link href={`/payroll/${weekId}/statement/print`} className="flex items-center gap-1.5 text-sm text-[var(--primary)] hover:underline">
           <FileText size={14} /> Full Statement
         </Link>
-        <button onClick={() => window.print()} className="ml-auto flex items-center gap-2 px-4 py-2 bg-[var(--primary)] text-white text-sm">
-          <Printer size={14} /> Print
+        <button onClick={handleDownload} disabled={saving} className="ml-auto flex items-center gap-2 px-4 py-2 bg-[var(--primary)] text-white text-sm disabled:opacity-60">
+          {saving ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+          {saving ? 'Generating…' : 'Download PDF'}
         </button>
       </div>
 
