@@ -347,3 +347,114 @@ export async function fetchWorkyardTimecards(
     stats: { total: cards.length, allocations: rows.length },
   }
 }
+
+/** Matches the Workyard "Dumpster Overflow" cost code (English + Spanish "desborde"). */
+const DUMP_OVERFLOW_RE = /desborde|dumpster overflow/i
+
+/** One property's overflow-hauling labor over the queried range. */
+export interface DumpsterOverflowRow {
+  /** Workyard org_project_id (null only for the no-project bucket). */
+  projectId: number | null
+  /** Leading S-code parsed from the Workyard project name (the bill-to property). */
+  sCode: string
+  customerName: string
+  hours: number
+}
+
+export interface DumpsterOverflowResult {
+  /** Per-property overflow hours, ranked high→low. Excludes the no-project bucket. */
+  byProperty: DumpsterOverflowRow[]
+  /** Overflow hours tagged to no project — billing leakage (PRD metric 3). */
+  noProjectHours: number
+  /** Total overflow hours including the no-project bucket. */
+  totalHours: number
+  /** Span of the queried range in weeks, for annualization. */
+  weeks: number
+  /** Time cards scanned in the range. */
+  cardsScanned: number
+  start: string
+  end: string
+}
+
+/**
+ * Aggregate Dumpster-Overflow (DUMP) hauling hours per property over a date range, read
+ * live from Workyard. `start` inclusive, `end` exclusive, both YYYY-MM-DD in org time.
+ *
+ * Hours come from each matching cost allocation's clocked `duration_secs` (the activity time),
+ * matching scripts/dumpster-history.mts — the proven read-only pull this report grew out of.
+ * The crew is physically at the building hauling overflow, so the allocation's project already
+ * is the property; no S-code-in-cost-code recovery is needed for the DUMP signal.
+ */
+export async function fetchDumpsterOverflowByProperty(
+  start: string,
+  end: string,
+  approvedOnly = true
+): Promise<DumpsterOverflowResult> {
+  const startUnix = orgMidnightUnix(start)
+  const endUnix = orgMidnightUnix(end)
+  const spanWeeks = Math.max((endUnix - startUnix) / 86400 / 7, 1 / 7)
+
+  // Dev/test path: deterministic dummy data instead of calling Workyard.
+  if (isWorkyardMockEnabled()) {
+    const byProperty: DumpsterOverflowRow[] = [
+      { projectId: 1, sCode: 'S0020', customerName: 'Mock LLC', hours: 8.6 * spanWeeks },
+      { projectId: 2, sCode: 'S0049', customerName: 'Mock LLC', hours: 3.4 * spanWeeks },
+      { projectId: 3, sCode: 'S0010', customerName: 'Mock LLC', hours: 3.0 * spanWeeks },
+    ]
+    const noProjectHours = 2.5 * spanWeeks
+    return {
+      byProperty,
+      noProjectHours,
+      totalHours: byProperty.reduce((s, p) => s + p.hours, 0) + noProjectHours,
+      weeks: spanWeeks,
+      cardsScanned: 0,
+      start,
+      end,
+    }
+  }
+
+  const [cards, projectMap] = await Promise.all([
+    fetchApprovedTimeCards(startUnix, endUnix, approvedOnly),
+    fetchProjectMap(),
+  ])
+
+  const byCode = new Map<string, { projectId: number; sCode: string; customerName: string; secs: number }>()
+  let noProjectSecs = 0
+
+  for (const card of cards) {
+    for (const alloc of card.cost_allocations ?? []) {
+      if (!DUMP_OVERFLOW_RE.test(alloc.job_code?.name ?? '')) continue
+      const secs = alloc.duration_secs ?? 0
+      if (!alloc.org_project_id) {
+        noProjectSecs += secs
+        continue
+      }
+      const proj = projectMap.get(alloc.org_project_id)
+      const sCode = proj?.sCode ?? `proj ${alloc.org_project_id}`
+      const entry = byCode.get(sCode) ?? {
+        projectId: alloc.org_project_id,
+        sCode,
+        customerName: proj?.customerName ?? '',
+        secs: 0,
+      }
+      entry.secs += secs
+      byCode.set(sCode, entry)
+    }
+  }
+
+  const byProperty: DumpsterOverflowRow[] = [...byCode.values()]
+    .map(e => ({ projectId: e.projectId, sCode: e.sCode, customerName: e.customerName, hours: e.secs / 3600 }))
+    .sort((a, b) => b.hours - a.hours)
+
+  const noProjectHours = noProjectSecs / 3600
+
+  return {
+    byProperty,
+    noProjectHours,
+    totalHours: byProperty.reduce((s, p) => s + p.hours, 0) + noProjectHours,
+    weeks: spanWeeks,
+    cardsScanned: cards.length,
+    start,
+    end,
+  }
+}

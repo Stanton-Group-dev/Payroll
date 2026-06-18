@@ -26,6 +26,7 @@ import {
   Laptop,
   FileText,
   SlidersHorizontal,
+  Trash2,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/payroll/useAuth'
 import { SelectedWeekProvider } from '@/hooks/payroll/useSelectedWeek'
@@ -47,6 +48,7 @@ const navItems = [
 
 const analyticsItems = [
   { href: '/payroll/analytics', label: 'Cost-Per-Unit', icon: TrendingUp },
+  { href: '/payroll/dumpsters', label: 'Dumpster Sizing', icon: Trash2 },
 ]
 
 const adminItems = [
