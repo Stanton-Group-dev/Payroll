@@ -1,6 +1,6 @@
 ﻿'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import { format, parseISO } from 'date-fns'
 import type { PayrollEmployee, PayrollTimeEntry } from '@/lib/supabase/types'
@@ -11,13 +11,19 @@ interface AdjustmentLogProps {
   corrections: AdjustmentLogEntry[]
   manualEntries: PayrollTimeEntry[]
   employees: PayrollEmployee[]
+  defaultEmployeeId?: string
 }
 
-export function AdjustmentLog({ corrections, manualEntries, employees }: AdjustmentLogProps) {
+export function AdjustmentLog({ corrections, manualEntries, employees, defaultEmployeeId }: AdjustmentLogProps) {
   const [open, setOpen] = useState(false)
-  const [filterEmployeeId, setFilterEmployeeId] = useState('')
+  const [filterEmployeeId, setFilterEmployeeId] = useState(defaultEmployeeId ?? '')
   const [filterOperation, setFilterOperation] = useState('')
   const [filterDate, setFilterDate] = useState('')
+
+  // Re-target the log to the currently-viewed employee when it changes.
+  useEffect(() => {
+    setFilterEmployeeId(defaultEmployeeId ?? '')
+  }, [defaultEmployeeId])
 
   const filteredCorrections = useMemo(() => {
     return corrections.filter(c => {
@@ -103,9 +109,9 @@ export function AdjustmentLog({ corrections, manualEntries, employees }: Adjustm
                     const prop = e.property as unknown as { code: string; name: string } | null
                     return (
                       <tr key={e.id} className="border-t border-[var(--divider)]">
-                        <td className="px-3 py-2">{emp?.name ?? '—'}</td>
+                        <td className="px-3 py-2 text-sm font-semibold text-[var(--ink)] whitespace-nowrap">{emp?.name ?? '—'}</td>
                         <td className="px-3 py-2 text-xs text-[var(--muted)]">{e.entry_date}</td>
-                        <td className="px-3 py-2 text-right">{e.regular_hours + e.ot_hours}</td>
+                        <td className="px-3 py-2 text-right">{(e.regular_hours + e.ot_hours).toFixed(2)}</td>
                         <td className="px-3 py-2 font-mono text-xs">{prop?.code ?? '—'}</td>
                         <td className="px-3 py-2 text-xs text-[var(--muted)]">{e.source}</td>
                       </tr>
@@ -122,14 +128,14 @@ export function AdjustmentLog({ corrections, manualEntries, employees }: Adjustm
             <table className="w-full text-sm border border-[var(--border)]">
               <thead>
                 <tr className="bg-[var(--bg-section)] text-xs text-[var(--muted)] border-b border-[var(--border)]">
-                  <th className="px-3 py-2 text-left font-medium">When</th>
-                  <th className="px-3 py-2 text-left font-medium">Who</th>
-                  <th className="px-3 py-2 text-left font-medium">Operation</th>
                   <th className="px-3 py-2 text-left font-medium">Employee</th>
+                  <th className="px-3 py-2 text-left font-medium">Operation</th>
                   <th className="px-3 py-2 text-left font-medium">Date</th>
                   <th className="px-3 py-2 text-right font-medium">Hours</th>
                   <th className="px-3 py-2 text-left font-medium">Destination</th>
                   <th className="px-3 py-2 text-left font-medium">Reason</th>
+                  <th className="px-3 py-2 text-left font-medium">Adjusted by</th>
+                  <th className="px-3 py-2 text-left font-medium">When</th>
                 </tr>
               </thead>
               <tbody>
@@ -144,22 +150,24 @@ export function AdjustmentLog({ corrections, manualEntries, employees }: Adjustm
                                                'bg-[var(--primary)]/10 text-[var(--primary)]'
                   return (
                     <tr key={c.id} className="border-t border-[var(--divider)]">
-                      <td className="px-3 py-2 text-xs text-[var(--muted)] whitespace-nowrap">
-                        {format(parseISO(c.corrected_at), 'MMM d, h:mma')}
+                      <td className="px-3 py-2 text-sm font-semibold text-[var(--ink)] whitespace-nowrap">
+                        {te?.employee?.name ?? '—'}
                       </td>
-                      <td className="px-3 py-2 text-xs text-[var(--muted)] whitespace-nowrap">{correctorLabel}</td>
                       <td className="px-3 py-2">
                         <span className={`text-xs px-1.5 py-0.5 font-medium uppercase tracking-wide ${opColor}`}>
                           {c.operation ?? 'reassign'}
                         </span>
                       </td>
-                      <td className="px-3 py-2 text-sm">{te?.employee?.name ?? '—'}</td>
-                      <td className="px-3 py-2 text-xs text-[var(--muted)]">{te?.entry_date ?? '—'}</td>
-                      <td className="px-3 py-2 text-right text-sm">{c.hours}</td>
+                      <td className="px-3 py-2 text-xs text-[var(--muted)] whitespace-nowrap">{te?.entry_date ?? '—'}</td>
+                      <td className="px-3 py-2 text-right text-sm">{Number(c.hours).toFixed(2)}</td>
                       <td className="px-3 py-2 text-xs font-mono">
                         {toProp ? `${toProp.code} — ${toProp.name}` : '—'}
                       </td>
                       <td className="px-3 py-2 text-xs text-[var(--muted)] max-w-48 truncate">{c.reason}</td>
+                      <td className="px-3 py-2 text-xs text-[var(--muted)] whitespace-nowrap">{correctorLabel}</td>
+                      <td className="px-3 py-2 text-xs text-[var(--muted)] whitespace-nowrap">
+                        {format(parseISO(c.corrected_at), 'MMM d, h:mma')}
+                      </td>
                     </tr>
                   )
                 })}
