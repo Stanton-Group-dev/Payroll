@@ -112,10 +112,11 @@ export function getMgmtFeeRate(
  *    the OT premium — OT hours paid at straight rate (1.0×).
  *  - hourly (W2), all other departments: time-and-a-half (1.5×) per FLSA.
  */
-export function otMultiplier(type: string, department?: string | null): number {
+export function otMultiplier(type: string, department?: string | null, otAllowed: boolean = true): number {
   if (type === 'salaried') return 0     // exempt — no hourly OT
   if (type === 'contractor') return 1.0 // 1099 — no OT premium
   if (department && department.toLowerCase().includes('construction')) return 1.0 // construction: not OT-eligible
+  if (!otAllowed) return 1.0            // roster flag: OT not authorized → straight time, no premium
   return 1.5                            // W2 hourly — FLSA time-and-a-half
 }
 
@@ -171,7 +172,7 @@ export function calculatePayroll(
     empData[entry.employee_id].ot_hours += entry.ot_hours ?? 0
     empData[entry.employee_id].pto_hours += entry.pto_hours ?? 0
     empData[entry.employee_id].regular_wages += (entry.regular_hours ?? 0) * rate
-    empData[entry.employee_id].ot_wages += (entry.ot_hours ?? 0) * rate * otMultiplier(emp.type, emp.department)
+    empData[entry.employee_id].ot_wages += (entry.ot_hours ?? 0) * rate * otMultiplier(emp.type, emp.department, emp.ot_allowed)
   }
 
   // Salaried employees: use weekly_rate directly
@@ -256,7 +257,7 @@ export function calculatePayroll(
     if (!emp) continue
     const rate = emp.hourly_rate ?? 0
     // OT premium flows into the property's labor cost too (it bears the actual wage).
-    const cost = (entry.regular_hours ?? 0) * rate + (entry.ot_hours ?? 0) * rate * otMultiplier(emp.type, emp.department)
+    const cost = (entry.regular_hours ?? 0) * rate + (entry.ot_hours ?? 0) * rate * otMultiplier(emp.type, emp.department, emp.ot_allowed)
     propLaborCost[entry.property_id] = (propLaborCost[entry.property_id] ?? 0) + cost
     const hours = (entry.regular_hours ?? 0) + (entry.ot_hours ?? 0)
     if (hours > 0) {

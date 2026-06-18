@@ -33,7 +33,7 @@ export function useADPReconciliation(weekId: string) {
     const [weekRes, reconRes, empRes, entRes, adjRes] = await Promise.all([
       supabase.from('payroll_weeks').select('*').eq('id', weekId).single(),
       supabase.from('payroll_adp_reconciliation').select('*').eq('payroll_week_id', weekId).maybeSingle(),
-      supabase.from('payroll_employees').select('id, name, hourly_rate, weekly_rate, type, department').eq('is_active', true),
+      supabase.from('payroll_employees').select('id, name, hourly_rate, weekly_rate, type, department, ot_allowed').eq('is_active', true),
       supabase.from('payroll_time_entries').select('*').eq('payroll_week_id', weekId).eq('is_flagged', false),
       supabase.from('payroll_adjustments').select('*').eq('payroll_week_id', weekId).eq('is_active', true),
     ])
@@ -59,9 +59,9 @@ export function useADPReconciliation(weekId: string) {
       setExistingRows([])
     }
 
-    const empMap: Record<string, { name: string; hourly_rate: number; weekly_rate: number | null; type: string; department: string | null }> = {}
+    const empMap: Record<string, { name: string; hourly_rate: number; weekly_rate: number | null; type: string; department: string | null; ot_allowed: boolean }> = {}
     for (const e of (empRes.data ?? [])) {
-      empMap[e.id] = { name: e.name, hourly_rate: e.hourly_rate ?? 0, weekly_rate: e.weekly_rate ?? null, type: e.type ?? 'hourly', department: e.department ?? null }
+      empMap[e.id] = { name: e.name, hourly_rate: e.hourly_rate ?? 0, weekly_rate: e.weekly_rate ?? null, type: e.type ?? 'hourly', department: e.department ?? null, ot_allowed: e.ot_allowed ?? true }
     }
 
     const empGross: Record<string, number> = {}
@@ -72,7 +72,7 @@ export function useADPReconciliation(weekId: string) {
       if (emp.type === 'salaried' && emp.weekly_rate) {
         empGross[entry.employee_id] = emp.weekly_rate
       } else {
-        empGross[entry.employee_id] += (entry.regular_hours ?? 0) * emp.hourly_rate + (entry.ot_hours ?? 0) * emp.hourly_rate * otMultiplier(emp.type, emp.department)
+        empGross[entry.employee_id] += (entry.regular_hours ?? 0) * emp.hourly_rate + (entry.ot_hours ?? 0) * emp.hourly_rate * otMultiplier(emp.type, emp.department, emp.ot_allowed)
       }
     }
     for (const adj of (adjRes.data ?? [])) {

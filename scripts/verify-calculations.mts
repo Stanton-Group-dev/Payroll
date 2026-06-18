@@ -102,6 +102,17 @@ console.log('\n== 2. OVERTIME by worker class: W2 hourly 1.5x, contractor 1.0x =
   const bc = get(c99, 'B')
   check('contractor ot_wages 200 = straight rate (no premium)', bc.ot_wages === 200, `${bc.ot_wages}`)
   check('contractor gross 1000', bc.gross_pay === 1000, `${bc.gross_pay}`)
+
+  // W2 hourly WITHOUT OT rights (ot_allowed=false): OT hours paid at straight time.
+  //   ot = 10 * 20 * 1.0 = 200; gross = 1000 (no time-and-a-half premium)
+  const noOt = calculatePayroll(
+    [emp({ id: 'B', name: 'Bo', type: 'hourly', hourly_rate: 20, ot_allowed: false })],
+    [entry({ employee_id: 'B', regular_hours: 40, ot_hours: 10 })],
+    [], NO_FEES, []
+  )
+  const bn = get(noOt, 'B')
+  check('no-OT-rights ot_wages 200 = straight time (no premium)', bn.ot_wages === 200, `${bn.ot_wages}`)
+  check('no-OT-rights gross 1000 (not 1100)', bn.gross_pay === 1000, `${bn.gross_pay}`)
 }
 
 console.log('\n== 3. Adjustments: phone adds, advance/deduction SUBTRACT ==')
