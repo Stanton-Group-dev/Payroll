@@ -222,6 +222,49 @@ export interface PayrollDeptSplitOverride {
   updated_at: string
 }
 
+export type HoldStatus = 'held' | 'released'
+export type HoldReason = 'unallocated_hours'
+export type NotificationChannel = 'sms' | 'email'
+export type NotificationStatus = 'queued' | 'sent' | 'dry_run' | 'skipped' | 'failed'
+
+/** A (week, employee) pay hold. A 'held' row pulls the employee out of the run
+ *  entirely until they bring a written reason; 'released' carries that reason. */
+export interface PayrollEmployeeHold {
+  id: string
+  payroll_week_id: string
+  employee_id: string
+  reason: HoldReason | string
+  unallocated_hours: number
+  status: HoldStatus
+  held_by: string | null
+  held_at: string
+  resolution_note: string | null
+  released_by: string | null
+  released_at: string | null
+  created_at: string
+  updated_at: string
+  employee?: PayrollEmployee
+}
+
+/** Outbox row for a message to an employee (SMS today). One row per send attempt,
+ *  recorded whether it was actually sent, dry-run, skipped, or failed. */
+export interface PayrollNotification {
+  id: string
+  payroll_week_id: string | null
+  employee_id: string
+  channel: NotificationChannel
+  to_address: string | null
+  body: string
+  status: NotificationStatus
+  provider: string | null
+  provider_ref: string | null
+  error: string | null
+  created_by: string | null
+  created_at: string
+  sent_at: string | null
+  employee?: PayrollEmployee
+}
+
 export interface PayrollAdjustment {
   id: string
   payroll_week_id: string

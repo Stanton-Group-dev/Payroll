@@ -17,6 +17,8 @@ export interface WYEmployeeBasic {
   hourly_rate: number | null
   /** Workyard pay_type: 'hourly' | '1099' | 'salary' | etc. Helps the user judge the rate. */
   pay_type: string | null
+  /** Mobile number from Workyard (`mobile` on the employee resource), used to refresh the roster phone. */
+  phone: string | null
 }
 
 /**
@@ -33,6 +35,8 @@ interface WYEmployeeV1 {
   title?: string | null
   pay_rate?: number | string | null
   pay_type?: string | null
+  mobile?: string | null
+  phone?: string | null
   is_pending_profile?: boolean
   end_dt_unix?: number | null
 }
@@ -61,6 +65,7 @@ function mapV1(e: WYEmployeeV1): WYEmployeeBasic {
     title: e.title ?? null,
     hourly_rate: toNumber(e.pay_rate),
     pay_type: e.pay_type ?? null,
+    phone: e.mobile ?? e.phone ?? null,
   }
 }
 

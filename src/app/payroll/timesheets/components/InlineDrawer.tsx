@@ -11,6 +11,35 @@ import type { SelectedCell } from './WeekGrid'
 type DrawerTab = 'assign' | 'split' | 'spread' | 'pending' | 'edit'
 type SpreadMode = 'portfolio' | 'all'
 
+// A row in the Split form. `locked` means the user typed a specific value for
+// this row, so auto-balancing leaves it alone and divides the remainder among
+// the other (unlocked) rows.
+type SplitRow = { propertyId: string; hours: string; locked?: boolean }
+
+// Distribute `total` hours evenly across every row that has a property, while
+// preserving rows the user has locked to a specific value. The last unlocked
+// row absorbs any rounding remainder so the rows always sum to `total`. Rows
+// without a property are cleared so stale hours don't linger after deselect.
+function balanceSplitRows(rows: SplitRow[], total: number): SplitRow[] {
+  const lockedSum = rows.reduce(
+    (s, r) => (r.propertyId && r.locked && r.hours !== '' ? s + (parseFloat(r.hours) || 0) : s),
+    0,
+  )
+  const autoCount = rows.filter(r => r.propertyId && !(r.locked && r.hours !== '')).length
+  const remaining = Math.max(0, parseFloat((total - lockedSum).toFixed(2)))
+  const share = autoCount > 0 ? Math.floor((remaining / autoCount) * 100) / 100 : 0
+  let seen = 0
+  let used = 0
+  return rows.map(r => {
+    if (!r.propertyId) return r.hours !== '' || r.locked ? { ...r, hours: '', locked: false } : r
+    if (r.locked && r.hours !== '') return r
+    seen++
+    const h = seen === autoCount ? parseFloat((remaining - used).toFixed(2)) : share
+    used = parseFloat((used + share).toFixed(2))
+    return { ...r, hours: h > 0 ? String(h) : '', locked: false }
+  })
+}
+
 const REASON_OPTIONS = [
   'Manager dispatch',
   'Clock-in error',
@@ -318,8 +347,9 @@ export function InlineDrawer({
   const [editReason, setEditReason] = useState('')
 
   // Split form
-  const [splitRows, setSplitRows] = useState([{ propertyId: '', hours: '' }, { propertyId: '', hours: '' }])
+  const [splitRows, setSplitRows] = useState<SplitRow[]>([{ propertyId: '', hours: '' }, { propertyId: '', hours: '' }])
   const [splitReason, setSplitReason] = useState('')
+  const [splitUnit, setSplitUnit] = useState<'hrs' | 'pct'>('hrs')
 
   // Spread form — amount defaults to the full unallocated block (all hours)
   const [spreadPropertyIds, setSpreadPropertyIds] = useState<string[]>([])
@@ -370,6 +400,23 @@ export function InlineDrawer({
   const entryDate = format(parseISO(primaryEntry.entry_date), 'EEE, MMM d')
   const splitTotal = splitRows.reduce((s, r) => s + (parseFloat(r.hours) || 0), 0)
   const splitRemaining = parseFloat((entryHours - splitTotal).toFixed(2))
+
+  // Split handlers — picking properties auto-distributes hours evenly; typing a
+  // value locks that row and rebalances the rest. `Split evenly` clears locks.
+  const pctToHours = (pct: string) =>
+    pct === '' ? '' : String(parseFloat((entryHours * (parseFloat(pct) || 0) / 100).toFixed(2)))
+  const hoursToPct = (h: string) =>
+    h === '' || entryHours === 0 ? '' : String(Math.round((parseFloat(h) / entryHours) * 100))
+  const setSplitProperty = (i: number, propertyId: string) =>
+    setSplitRows(rows => balanceSplitRows(rows.map((r, j) => j === i ? { ...r, propertyId } : r), entryHours))
+  const setSplitHours = (i: number, hours: string) =>
+    setSplitRows(rows => balanceSplitRows(rows.map((r, j) => j === i ? { ...r, hours, locked: true } : r), entryHours))
+  const addSplitRow = () =>
+    setSplitRows(rows => balanceSplitRows([...rows, { propertyId: '', hours: '' }], entryHours))
+  const removeSplitRow = (i: number) =>
+    setSplitRows(rows => balanceSplitRows(rows.filter((_, j) => j !== i), entryHours))
+  const splitEvenly = () =>
+    setSplitRows(rows => balanceSplitRows(rows.map(r => ({ ...r, locked: false })), entryHours))
   const spreadHours = parseFloat(spreadAmount) || 0
   const spreadRemaining = parseFloat((entryHours - spreadHours).toFixed(2))
 
@@ -513,35 +560,52 @@ export function InlineDrawer({
         {/* ── Split ── */}
         {activeTab === 'split' && (
           <div className="space-y-2">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <span className="text-xs text-[var(--muted)]">Distribute {entryHours}h across properties</span>
-              <span className={`text-xs font-medium ${Math.abs(splitRemaining) < 0.01 ? 'text-[var(--success)]' : 'text-[var(--warning)]'}`}>
-                {Math.abs(splitRemaining) < 0.01
-                  ? '✓ balanced'
-                  : splitRemaining > 0 ? `${splitRemaining}h remaining` : `${Math.abs(splitRemaining)}h over`}
-              </span>
+              <div className="flex items-center gap-2">
+                <div className="flex rounded border border-[var(--border)] overflow-hidden text-[10px]">
+                  {(['hrs', 'pct'] as const).map(u => (
+                    <button key={u} type="button" onClick={() => setSplitUnit(u)}
+                      className={`px-2 py-0.5 transition-colors ${splitUnit === u ? 'bg-[var(--primary)] text-white' : 'text-[var(--muted)] hover:bg-[var(--bg-section)]'}`}>
+                      {u === 'hrs' ? 'Hours' : '%'}
+                    </button>
+                  ))}
+                </div>
+                <span className={`text-xs font-medium ${Math.abs(splitRemaining) < 0.01 ? 'text-[var(--success)]' : 'text-[var(--warning)]'}`}>
+                  {Math.abs(splitRemaining) < 0.01
+                    ? '✓ balanced'
+                    : splitRemaining > 0 ? `${splitRemaining}h remaining` : `${Math.abs(splitRemaining)}h over`}
+                </span>
+              </div>
             </div>
             {splitRows.map((row, i) => (
               <div key={i} className="flex items-center gap-2">
                 <div className="flex-1">
                   <FormSelect value={row.propertyId}
-                    onChange={e => setSplitRows(r => r.map((x, j) => j === i ? { ...x, propertyId: e.target.value } : x))}>
+                    onChange={e => setSplitProperty(i, e.target.value)}>
                     <option value="">— Property —</option>
                     {properties.map(p => <option key={p.id} value={p.id}>{p.code} — {p.name}</option>)}
                   </FormSelect>
                 </div>
-                <div className="w-20">
-                  <FormInput type="number" step="0.25" min="0" value={row.hours} placeholder="hrs"
-                    onChange={e => setSplitRows(r => r.map((x, j) => j === i ? { ...x, hours: e.target.value } : x))} />
+                <div className="w-24 flex items-center gap-1">
+                  <FormInput type="number" step={splitUnit === 'hrs' ? '0.25' : '1'} min="0"
+                    value={splitUnit === 'hrs' ? row.hours : hoursToPct(row.hours)}
+                    placeholder={splitUnit === 'hrs' ? 'hrs' : '%'}
+                    onChange={e => setSplitHours(i, splitUnit === 'hrs' ? e.target.value : pctToHours(e.target.value))} />
+                  <span className="text-[10px] text-[var(--muted)] shrink-0 w-2">{splitUnit === 'hrs' ? 'h' : '%'}</span>
                 </div>
                 {splitRows.length > 2 && (
-                  <button type="button" onClick={() => setSplitRows(r => r.filter((_, j) => j !== i))}
+                  <button type="button" onClick={() => removeSplitRow(i)}
                     className="text-[var(--muted)] hover:text-[var(--error)] text-sm px-1 shrink-0">✕</button>
                 )}
               </div>
             ))}
-            <button type="button" onClick={() => setSplitRows(r => [...r, { propertyId: '', hours: '' }])}
-              className="text-xs text-[var(--primary)] hover:underline">+ Add row</button>
+            <div className="flex items-center gap-3">
+              <button type="button" onClick={addSplitRow}
+                className="text-xs text-[var(--primary)] hover:underline">+ Add row</button>
+              <button type="button" onClick={splitEvenly}
+                className="text-xs text-[var(--muted)] hover:text-[var(--ink)] hover:underline">Split evenly</button>
+            </div>
             <FormTextarea value={splitReason} onChange={e => setSplitReason(e.target.value)}
               placeholder="Reason (required)" rows={2} />
             <div className="flex gap-2">

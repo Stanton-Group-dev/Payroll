@@ -5,6 +5,7 @@ import { Plus, BarChart2, ChevronDown, ChevronUp, RefreshCw, Check, Link, X } fr
 import { usePayrollEmployees, useEmployeeRates, useEmployeeDeptSplits } from '@/hooks/payroll/usePayrollEmployees'
 import { useWorkyardReliability } from '@/hooks/payroll/useWorkyardReliability'
 import DataTable, { Column } from '@/components/kit/DataTable'
+import { StickyTableLayout } from '@/components/kit/StickyTableLayout'
 import {
   PageHeader, FormButton, FormField, FormInput, FormSelect, StatusBadge,
   Drawer, SectionDivider, InfoBlock, FormTextarea,
@@ -23,6 +24,7 @@ interface WYEmployeeBasic {
   title: string | null
   hourly_rate: number | null
   pay_type: string | null
+  phone: string | null
 }
 
 interface SyncRow {
@@ -33,9 +35,10 @@ interface SyncRow {
   autoMatched: boolean
   wyRate: number | null
   wyPayType: string | null
+  wyPhone: string | null
 }
 
-const DEPARTMENTS = ['Acquisitions', 'Asset Management', 'Collections', 'Maintenance', 'Leasing', 'Administration']
+const DEPARTMENTS = ['Acquisitions', 'Asset Management', 'Collections', 'Construction', 'Maintenance', 'Leasing', 'Administration']
 
 const columns: Column<PayrollEmployee & Record<string, unknown>>[] = [
   { key: 'name', label: 'Name', width: 180 },
@@ -144,6 +147,7 @@ export default function EmployeesPage() {
           autoMatched: !!matched,
           wyRate: wy.hourly_rate ?? null,
           wyPayType: wy.pay_type ?? null,
+          wyPhone: wy.phone ?? null,
         }
       })
       setSyncRows(rows)
@@ -163,18 +167,23 @@ export default function EmployeesPage() {
       const today = new Date().toISOString().split('T')[0]
       const toUpdate = syncRows.filter(r => r.matchedEmployeeId)
       let ratesApplied = 0
+      let phonesApplied = 0
       for (const row of toUpdate) {
         const current = employees.find(e => e.id === row.matchedEmployeeId)
         const rateChanged =
           row.wyRate != null && Number(current?.hourly_rate ?? NaN) !== row.wyRate
-        const update: { workyard_id: string; hourly_rate?: number } = { workyard_id: row.wyId }
+        const phoneChanged =
+          !!row.wyPhone && (current?.phone ?? '') !== row.wyPhone
+        const update: { workyard_id: string; hourly_rate?: number; phone?: string } = { workyard_id: row.wyId }
         if (rateChanged) update.hourly_rate = row.wyRate as number
+        if (phoneChanged) update.phone = row.wyPhone as string
 
         const { error } = await supabase
           .from('payroll_employees')
           .update(update)
           .eq('id', row.matchedEmployeeId)
         if (error) throw new Error(error.message)
+        if (phoneChanged) phonesApplied++
 
         // Record the rate in the effective-dated history so the change is auditable.
         if (rateChanged) {
@@ -189,9 +198,12 @@ export default function EmployeesPage() {
       }
       await refetch()
       setSyncDone(true)
+      const pulled: string[] = []
+      if (ratesApplied > 0) pulled.push(`${ratesApplied} pay rate${ratesApplied === 1 ? '' : 's'}`)
+      if (phonesApplied > 0) pulled.push(`${phonesApplied} phone number${phonesApplied === 1 ? '' : 's'}`)
       setSyncSummary(
         `Linked ${toUpdate.length} employee${toUpdate.length === 1 ? '' : 's'}` +
-          (ratesApplied > 0 ? ` · pulled ${ratesApplied} pay rate${ratesApplied === 1 ? '' : 's'} from Workyard` : '')
+          (pulled.length ? ` · pulled ${pulled.join(' and ')} from Workyard` : '')
       )
     } catch (err) {
       setSyncError(err instanceof Error ? err.message : 'Save failed')
@@ -297,10 +309,7 @@ export default function EmployeesPage() {
   const splitBalanced = Math.abs(splitTotal - 100) < 0.01
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Single page-level scroll region: the header scrolls up out of view and the
-          DataTable column headers pin to the top via stickyHeader. */}
-      <div className="flex-1 overflow-auto">
+    <StickyTableLayout>
       <PageHeader
         title="Employees & Rates"
         subtitle={`${employees.filter(e => e.is_active).length} active employees`}
@@ -332,7 +341,7 @@ export default function EmployeesPage() {
         <div className="border-b border-[var(--border)] bg-[var(--bg-section)] px-6 py-4">
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-serif text-base text-[var(--primary)]">Sync Workyard IDs &amp; Rates</h3>
-            <p className="text-xs text-[var(--muted)]">Match payroll employees to their Workyard accounts and pull their pay rates</p>
+            <p className="text-xs text-[var(--muted)]">Match payroll employees to their Workyard accounts and pull their pay rates and phone numbers</p>
           </div>
 
           {syncError && (
@@ -359,6 +368,7 @@ export default function EmployeesPage() {
                       <th className="px-3 py-2 text-left font-medium">Workyard Employee</th>
                       <th className="px-3 py-2 text-left font-medium">Workyard ID</th>
                       <th className="px-3 py-2 text-right font-medium">Rate</th>
+                      <th className="px-3 py-2 text-left font-medium">Phone</th>
                       <th className="px-3 py-2 text-left font-medium">Match to Payroll Employee</th>
                     </tr>
                   </thead>
@@ -383,6 +393,9 @@ export default function EmployeesPage() {
                           ) : (
                             <span className="text-[var(--muted)]">—</span>
                           )}
+                        </td>
+                        <td className="px-3 py-1.5 whitespace-nowrap">
+                          {row.wyPhone ?? <span className="text-[var(--muted)]">—</span>}
                         </td>
                         <td className="px-3 py-1.5">
                           <select
@@ -487,7 +500,6 @@ export default function EmployeesPage() {
             )}
           </div>
         )}
-      </div>
       </div>
 
       <Drawer open={drawerOpen} onClose={() => setDrawerOpen(false)} title={editing.id ? 'Edit Employee' : 'New Employee'} width={520}>
@@ -698,6 +710,6 @@ export default function EmployeesPage() {
           </FormButton>
         </div>
       </Drawer>
-    </div>
+    </StickyTableLayout>
   )
 }

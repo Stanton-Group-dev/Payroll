@@ -51,6 +51,7 @@ export interface MockWorkyardEmployee {
   title: string | null
   hourly_rate: number | null
   pay_type: string | null
+  phone: string | null
 }
 
 /** Mock of Workyard's employee roster (with pay rate) for the rate-sync flow. */
@@ -67,6 +68,8 @@ export function generateMockEmployees(): MockWorkyardEmployee[] {
       title: 'Maintenance Technician',
       hourly_rate: w.hourlyRate,
       pay_type: 'hourly',
+      // Deterministic placeholder so the offline sync visibly pulls a phone.
+      phone: `+1-555-${w.workyardId.slice(-4).padStart(4, '0')}`,
     }
   })
 }

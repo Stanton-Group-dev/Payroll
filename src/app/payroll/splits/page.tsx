@@ -13,7 +13,7 @@ import {
 } from '@/components/form'
 import { format } from 'date-fns'
 
-const DEPARTMENTS = ['Acquisitions', 'Asset Management', 'Collections', 'Maintenance', 'Leasing', 'Administration']
+const DEPARTMENTS = ['Acquisitions', 'Asset Management', 'Collections', 'Construction', 'Maintenance', 'Leasing', 'Administration']
 
 interface SplitRow { department: string; pct: string }
 

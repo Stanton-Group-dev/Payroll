@@ -78,6 +78,16 @@ export default function RosterPage() {
 
   const { audit, lastByField, refetch: refetchAudit } = useEmployeeAudit(editing.id ?? null)
 
+  // Sort people by employee code within each group; rows without a code sort last
+  // (then by name), and codes compare numerically so "9" precedes "10".
+  const byCode = (a: PayrollEmployee, b: PayrollEmployee) => {
+    const ca = a.employee_code?.trim(), cb = b.employee_code?.trim()
+    if (!ca && !cb) return a.name.localeCompare(b.name)
+    if (!ca) return 1
+    if (!cb) return -1
+    return ca.localeCompare(cb, undefined, { numeric: true, sensitivity: 'base' })
+  }
+
   const byDept = useMemo(() => {
     const groups = new Map<string, PayrollEmployee[]>()
     for (const dept of DEPARTMENTS) groups.set(dept, [])
@@ -88,6 +98,7 @@ export default function RosterPage() {
       else other.push(e)
     }
     if (other.length) groups.set('Unassigned', other)
+    for (const rows of groups.values()) rows.sort(byCode)
     return groups
   }, [employees])
 
