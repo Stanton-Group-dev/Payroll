@@ -189,6 +189,9 @@ export interface PayrollTimeEntry {
   pending_resolution: boolean
   pending_note: string | null
   pending_since: string | null
+  /** When true: no single billable property — wages are spread across all billable
+   *  properties by unit count (like salaried) and the row is excluded from unallocated holds. */
+  is_overhead_spread?: boolean
   spread_event_id: string | null
   created_at: string
   updated_at: string

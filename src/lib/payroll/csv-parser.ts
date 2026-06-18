@@ -1,4 +1,4 @@
-import { OVERHEAD_PROPERTY_NAMES } from '@/lib/payroll/config'
+import { OVERHEAD_PROPERTY_NAMES, SPREAD_OVERHEAD_PROJECT_NAMES } from '@/lib/payroll/config'
 
 export interface WorkyardRow {
   workyardId: string
@@ -22,6 +22,15 @@ export interface ParseResult {
 
 export function isOverheadProperty(name: string): boolean {
   return OVERHEAD_PROPERTY_NAMES.some(n => name.toLowerCase().includes(n))
+}
+
+/**
+ * True when a Workyard project name is an overhead project that should be paid but
+ * spread across all billable properties by unit count (like salaried), rather than
+ * direct-billed to one property. Whole-name (trimmed, case-insensitive) match.
+ */
+export function isSpreadOverheadProject(name: string): boolean {
+  return SPREAD_OVERHEAD_PROJECT_NAMES.includes(name.trim().toLowerCase())
 }
 
 export function parseWorkyardCSV(csvText: string): ParseResult {

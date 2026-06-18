@@ -200,6 +200,28 @@ export function calculatePayroll(
     }
   }
 
+  // Enforce weekly overtime at the 40-hour threshold for OT-eligible employees.
+  // The imported reg/OT split (from Workyard, or hand-keyed manual entries) is NOT
+  // trustworthy — manual rows can carry OT while worked hours are under 40, or push
+  // regular over 40. So for anyone who actually earns the 1.5× premium, recompute from
+  // their weekly worked total: the first 40 worked hours are regular, the rest are OT.
+  // (PTO is separate and never counts toward the 40.) Non-OT-eligible workers —
+  // contractors, construction, salaried, ot_allowed=false — already had their hours
+  // folded into regular at straight time above and are left untouched.
+  for (const emp of employees) {
+    const d = empData[emp.id]
+    if (!d) continue
+    if (otMultiplier(emp.type, emp.department, emp.ot_allowed) !== 1.5) continue
+    const worked = d.regular_hours + d.ot_hours
+    const ot = Math.max(0, worked - 40)
+    const reg = worked - ot
+    const rate = emp.hourly_rate ?? 0
+    d.regular_hours = reg
+    d.ot_hours = ot
+    d.regular_wages = reg * rate
+    d.ot_wages = ot * rate * 1.5
+  }
+
   // Process adjustments
   for (const adj of adjustments) {
     if (!empData[adj.employee_id]) continue
@@ -292,7 +314,19 @@ export function calculatePayroll(
   const salariedSpread = employees
     .filter(e => e.type === 'salaried' && e.weekly_rate)
     .reduce((sum, e) => sum + Number(e.weekly_rate), 0)
-  const spreadTotal = adjustmentSpread + salariedSpread
+  // Overhead-spread labor (e.g. "Office"): real hourly wages with no single billable
+  // property. They're already PAID in the per-employee loop above; here their cost is
+  // billed like salaried — spread across billable properties by unit count. Use the same
+  // wage basis as direct labor (OT premium per the employee's classification).
+  const overheadSpread = entries
+    .filter(e => e.is_overhead_spread)
+    .reduce((sum, e) => {
+      const emp = employeeMap[e.employee_id]
+      if (!emp) return sum
+      const rate = emp.hourly_rate ?? 0
+      return sum + (e.regular_hours ?? 0) * rate + (e.ot_hours ?? 0) * rate * otMultiplier(emp.type, emp.department, emp.ot_allowed)
+    }, 0)
+  const spreadTotal = adjustmentSpread + salariedSpread + overheadSpread
 
   // Spread only across BILLABLE properties — never onto non-billable / admin / test /
   // stale rows (include_in_invoicing = false), so the full salaried cost lands on real

@@ -138,7 +138,7 @@ export async function queryPay(
     const [{ data: entryData }, { data: adjData }] = await Promise.all([
       ctx.supabase
         .from('payroll_time_entries')
-        .select('id, employee_id, property_id, entry_date, regular_hours, ot_hours, pto_hours')
+        .select('id, employee_id, property_id, entry_date, regular_hours, ot_hours, pto_hours, is_overhead_spread')
         .eq('payroll_week_id', week.id)
         .eq('is_active', true)
         .in('employee_id', empIds),
@@ -334,7 +334,7 @@ async function runWeekResult(
   const [{ data: entryData }, { data: adjData }] = await Promise.all([
     ctx.supabase
       .from('payroll_time_entries')
-      .select('id, employee_id, property_id, entry_date, regular_hours, ot_hours, pto_hours, is_flagged, is_active')
+      .select('id, employee_id, property_id, entry_date, regular_hours, ot_hours, pto_hours, is_flagged, is_active, is_overhead_spread')
       .eq('payroll_week_id', week.id)
       .eq('is_active', true)
       .eq('is_flagged', false),

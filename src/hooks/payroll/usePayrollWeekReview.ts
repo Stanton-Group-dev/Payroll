@@ -116,7 +116,10 @@ export function usePayrollWeekReview(weekId: string) {
         .select('id', { count: 'exact', head: true })
         .eq('payroll_week_id', weekId)
         .is('property_id', null)
-        .eq('is_active', true),
+        .eq('is_active', true)
+        // Overhead-spread rows (e.g. "Office") have no property by design — they're
+        // allocated by unit-spread, not unresolved — so they never block approval.
+        .eq('is_overhead_spread', false),
     ])
     setPendingCount(pendingRes.count ?? 0)
     setUnresolvedCount(unresolvedRes.count ?? 0)
@@ -135,7 +138,8 @@ export function usePayrollWeekReview(weekId: string) {
       const supabase = createClient()
       const [{ count: unresolved }, { count: pending }] = await Promise.all([
         supabase.from('payroll_time_entries').select('id', { count: 'exact', head: true })
-          .eq('payroll_week_id', weekId).is('property_id', null).eq('is_active', true),
+          .eq('payroll_week_id', weekId).is('property_id', null).eq('is_active', true)
+          .eq('is_overhead_spread', false),
         supabase.from('payroll_time_entries').select('id', { count: 'exact', head: true })
           .eq('payroll_week_id', weekId).eq('pending_resolution', true).eq('is_active', true),
       ])

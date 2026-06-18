@@ -50,6 +50,9 @@ export async function detectUnallocatedEmployees(
     .eq('payroll_week_id', weekId)
     .is('property_id', null)
     .eq('is_active', true)
+    // Overhead-spread entries (e.g. "Office") have no property by design — they're
+    // allocated by unit-spread, not unresolved — so they never count as unallocated.
+    .eq('is_overhead_spread', false)
   if (error) throw new Error(error.message)
 
   const hoursByEmp = new Map<string, number>()
@@ -214,6 +217,8 @@ export async function waiveUnallocated(
     .eq('employee_id', opts.employeeId)
     .is('property_id', null)
     .eq('is_active', true)
+    // Never write off overhead-spread (e.g. "Office") hours — they're allocated, not unresolved.
+    .eq('is_overhead_spread', false)
   if (selErr) throw new Error(selErr.message)
 
   const work = (rows ?? []).filter(r => (r.regular_hours ?? 0) + (r.ot_hours ?? 0) > 0)

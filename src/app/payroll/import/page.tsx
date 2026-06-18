@@ -8,7 +8,7 @@ import { usePayrollEmployees } from '@/hooks/payroll/usePayrollEmployees'
 import { useProperties } from '@/hooks/payroll/useProperties'
 import { PageHeader, FormButton, FormSelect, FormField, InfoBlock } from '@/components/form'
 import { createClient } from '@/lib/supabase/client'
-import { parseWorkyardCSV, isOverheadProperty, type WorkyardRow } from '@/lib/payroll/csv-parser'
+import { parseWorkyardCSV, isOverheadProperty, isSpreadOverheadProject, type WorkyardRow } from '@/lib/payroll/csv-parser'
 import type { PayrollEmployee } from '@/lib/supabase/types'
 import { format } from 'date-fns'
 
@@ -18,6 +18,9 @@ interface MatchedRow extends WorkyardRow {
   propertyId?: string
   propertyName?: string
   flag?: string
+  /** Overhead project (e.g. "Office") — paid, but spread across all billable properties
+   *  by unit count rather than billed to one property. No property_id. */
+  overheadSpread?: boolean
   status: 'ok' | 'flagged' | 'unmatched_employee' | 'unmatched_property'
 }
 
@@ -63,6 +66,7 @@ export default function ImportPage() {
         (firstNameKey ? empByFirstName[firstNameKey] : undefined)
       const prop = propByCode[row.projectName?.toLowerCase()]
       const overhead = isOverheadProperty(row.projectName)
+      const spread = isSpreadOverheadProject(row.projectName)
 
       let status: MatchedRow['status'] = 'ok'
       let flag = ''
@@ -70,6 +74,10 @@ export default function ImportPage() {
       if (!emp) {
         status = 'unmatched_employee'
         flag = `No employee match for "${row.workyardId || row.employeeName}"`
+      } else if (spread) {
+        // Overhead project (e.g. "Office") — paid and spread across all billable
+        // properties by unit count, not billed to one. Stays active/unflagged.
+        status = 'ok'
       } else if (overhead) {
         status = 'flagged'
         flag = `Overhead property: "${row.projectName}" — needs redistribution`
@@ -82,8 +90,9 @@ export default function ImportPage() {
         ...row,
         employeeId: emp?.id,
         employeeName2: emp?.name,
-        propertyId: prop?.id,
-        propertyName: prop?.name ?? row.projectName,
+        propertyId: spread ? undefined : prop?.id,
+        propertyName: spread ? `${row.projectName} — spread across portfolio` : prop?.name ?? row.projectName,
+        overheadSpread: spread,
         status,
         flag,
       }
@@ -237,6 +246,7 @@ export default function ImportPage() {
           workyard_timecardid: row.timecardId,
           is_flagged: row.status === 'flagged',
           flag_reason: row.flag ?? null,
+          is_overhead_spread: row.overheadSpread ?? false,
         })
         if (row.status === 'flagged') flagged++
         else imported++

@@ -121,6 +121,42 @@ console.log('\n== 2. OVERTIME by worker class: W2 hourly 1.5x, contractor 1.0x =
   check('no-OT-rights gross 1000 (not 1100)', bn.gross_pay === 1000, `${bn.gross_pay}`)
 }
 
+console.log('\n== 2b. Weekly OT enforced at 40h — imported reg/OT split is ignored ==')
+{
+  // Mis-split #1: entries say 37 reg + 6 OT, but worked = 43 → engine recomputes 40 reg + 3 OT.
+  //   reg 40*20=800; ot 3*20*1.5=90; gross 890.
+  const r = calculatePayroll(
+    [emp({ id: 'W', name: 'Wk', type: 'hourly', hourly_rate: 20, ot_allowed: true })],
+    [entry({ employee_id: 'W', regular_hours: 37, ot_hours: 6 })],
+    [], NO_FEES, []
+  )
+  const w = get(r, 'W')
+  check('reg recomputed to 40 (was 37)', w.regular_hours === 40, `${w.regular_hours}`)
+  check('ot recomputed to 3 (43−40, was 6)', w.ot_hours === 3, `${w.ot_hours}`)
+  check('gross 890 (800 + 90)', w.gross_pay === 890, `${w.gross_pay}`)
+
+  // Mis-split #2: OT while UNDER 40 — 35 reg + 2 OT, worked 37 → 37 reg, 0 OT, no premium.
+  const r2 = calculatePayroll(
+    [emp({ id: 'U', name: 'Un', type: 'hourly', hourly_rate: 20, ot_allowed: true })],
+    [entry({ employee_id: 'U', regular_hours: 35, ot_hours: 2 })],
+    [], NO_FEES, []
+  )
+  const u = get(r2, 'U')
+  check('under-40: OT zeroed (was 2)', u.ot_hours === 0, `${u.ot_hours}`)
+  check('under-40: reg = 37 worked', u.regular_hours === 37, `${u.regular_hours}`)
+  check('under-40: gross 740 (37*20, no premium)', u.gross_pay === 740, `${u.gross_pay}`)
+
+  // Split across rows still totals correctly: 39.16 reg + 1.61 OT = 40.77 worked → 40 reg + 0.77 OT.
+  const r3 = calculatePayroll(
+    [emp({ id: 'J', name: 'Jo', type: 'hourly', hourly_rate: 19.5, ot_allowed: true })],
+    [entry({ employee_id: 'J', regular_hours: 39.16, ot_hours: 1.61 })],
+    [], NO_FEES, []
+  )
+  const j = get(r3, 'J')
+  check('40.77 worked → reg 40', j.regular_hours === 40, `${j.regular_hours}`)
+  check('40.77 worked → ot 0.77', near(j.ot_hours, 0.77), `${j.ot_hours}`)
+}
+
 console.log('\n== 3. Adjustments: phone adds, advance/deduction SUBTRACT ==')
 {
   // hourly_rate 0, no hours. Adjustments only.
@@ -271,6 +307,38 @@ console.log('\n== 9. Rounding to the cent ==')
     [], NO_FEES, []
   )
   check('99.995 → 100.00 (round half up)', get(r, 'G').gross_pay === 100, `${get(r, 'G').gross_pay}`)
+}
+
+console.log('\n== 9b. Overhead-spread labor (e.g. "Office"): PAID, billed by unit-spread ==')
+{
+  // O is W2 hourly @ $20. Two entries:
+  //   - 30 reg on P1 (direct labor)              → paid 30*20 = 600, billed direct to P1
+  //   - 10 reg + 2 OT, is_overhead_spread, no property (the "Office" rows)
+  //       paid  = 10*20 + 2*20*1.5 = 200 + 60 = 260  (worker IS paid — not dropped)
+  //       spread basis = same 260, split P1:P2 by units 10:30 → P1 65, P2 195
+  // P1 10 units, P2 30 units → 40 total.
+  //   P1 labor = 600 (direct only; the office row is NOT direct-billed)
+  //   P1 spread = 10/40*260 = 65 ; P2 spread = 30/40*260 = 195
+  // gross O = 600 + 260 = 860 (all hours paid)
+  const P1 = prop({ id: 'P1', code: 'P1', total_units: 10 })
+  const P2 = prop({ id: 'P2', code: 'P2', total_units: 30 })
+  const r = calculatePayroll(
+    [emp({ id: 'O', name: 'Of', type: 'hourly', hourly_rate: 20 })],
+    [
+      entry({ employee_id: 'O', regular_hours: 30, property_id: 'P1' }),
+      entry({ employee_id: 'O', regular_hours: 10, ot_hours: 2, property_id: null, is_overhead_spread: true }),
+    ],
+    [], NO_FEES, [P1, P2]
+  )
+  const o = get(r, 'O')
+  check('overhead hours PAID (gross 860, not dropped to 600)', o.gross_pay === 860, `${o.gross_pay}`)
+  check('regular_hours include office reg (40)', o.regular_hours === 40, `${o.regular_hours}`)
+  check('ot_hours include office OT (2)', o.ot_hours === 2, `${o.ot_hours}`)
+  const p1 = r.property_costs.find((p) => p.property_id === 'P1')!
+  const p2 = r.property_costs.find((p) => p.property_id === 'P2')!
+  check('P1 labor 600 (office NOT direct-billed)', p1.labor_cost === 600, `${p1.labor_cost}`)
+  check('P1 spread 65 (10/40 of 260)', near(p1.spread_cost, 65), `${p1.spread_cost}`)
+  check('P2 spread 195 (30/40 of 260)', near(p2.spread_cost, 195), `${p2.spread_cost}`)
 }
 
 console.log('\n== 10. config constants are what the math assumes ==')
