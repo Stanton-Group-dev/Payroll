@@ -24,6 +24,7 @@ import {
   Sparkles,
   CircleDollarSign,
   Laptop,
+  FileText,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/payroll/useAuth'
 
@@ -38,6 +39,7 @@ const navItems = [
   { href: '/payroll/mileage', label: 'Mileage', icon: Car },
   { href: '/payroll/adjustments', label: 'Adjustments', icon: DollarSign },
   { href: '/payroll/splits', label: 'Dept Splits', icon: SplitSquareVertical },
+  { href: '/payroll/billing', label: 'Invoices', icon: FileText },
   { href: '/payroll/history', label: 'History', icon: History },
 ]
 

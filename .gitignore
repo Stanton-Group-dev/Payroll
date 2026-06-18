@@ -39,3 +39,6 @@ Thumbs.db
 
 # graphify knowledge-graph build artifact (local-only; rebuild via /graphify)
 graphify-out/
+
+# local data backups (e.g. pre-clear DB dumps — may contain row data, never commit)
+scripts/backups/
