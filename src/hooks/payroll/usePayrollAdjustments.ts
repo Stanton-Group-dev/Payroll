@@ -71,11 +71,20 @@ export function usePayrollAdjustments(weekId: string | null) {
     const toAdd = eligible.filter(id => !existing.includes(id))
     if (toAdd.length === 0) return
     const userId = (await supabase.auth.getUser()).data.user?.id ?? null
+    // Phone reimbursement amount is a business setting (payroll_global_config); fall back to
+    // the historical default when unset so existing behavior is unchanged.
+    const { data: cfg } = await supabase
+      .from('payroll_global_config')
+      .select('phone_reimbursement_amount')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    const phoneAmount = cfg?.phone_reimbursement_amount ?? PHONE_REIMBURSEMENT_AMOUNT
     const rows = toAdd.map(employee_id => ({
       payroll_week_id: weekId,
       employee_id,
       type: 'phone' as const,
-      amount: PHONE_REIMBURSEMENT_AMOUNT,
+      amount: phoneAmount,
       description: 'Weekly phone reimbursement',
       allocation_method: 'unit_weighted' as const,
       created_by: userId,
