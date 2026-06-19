@@ -42,7 +42,8 @@ async function setPortfolios(
   grantedBy: string,
 ) {
   if (!admin) return
-  await admin.from('portfolio_users').delete().eq('user_id', userId)
+  const { error: delErr } = await admin.from('portfolio_users').delete().eq('user_id', userId)
+  if (delErr) throw new Error(`Failed to clear portfolios: ${delErr.message}`)
   if (portfolioIds.length === 0) return
   const rows = portfolioIds.map((pid) => ({
     user_id: userId,
@@ -143,8 +144,10 @@ export async function POST(req: NextRequest) {
         if (body.userId === callerId) {
           return NextResponse.json({ error: 'You cannot delete your own account' }, { status: 400 })
         }
-        await admin.from('portfolio_users').delete().eq('user_id', body.userId)
-        await admin.from('profiles').delete().eq('id', body.userId)
+        const { error: delPortErr } = await admin.from('portfolio_users').delete().eq('user_id', body.userId)
+        if (delPortErr) return NextResponse.json({ error: delPortErr.message }, { status: 400 })
+        const { error: delProfErr } = await admin.from('profiles').delete().eq('id', body.userId)
+        if (delProfErr) return NextResponse.json({ error: delProfErr.message }, { status: 400 })
         const { error } = await admin.auth.admin.deleteUser(body.userId)
         if (error) return NextResponse.json({ error: error.message }, { status: 400 })
         return NextResponse.json({ ok: true })

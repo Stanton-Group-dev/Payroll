@@ -92,11 +92,12 @@ export default function ThresholdsPage() {
 
     setSaving(propertyId)
     const supabase = createClient()
-    await supabase.from('payroll_property_thresholds').insert({
+    const { error: saveErr } = await supabase.from('payroll_property_thresholds').insert({
       property_id: propertyId,
       threshold_per_unit: threshold,
       effective_date: effectiveDate,
     })
+    if (saveErr) { setSaving(null); throw saveErr }
     setSaved(p => ({ ...p, [propertyId]: true }))
     setTimeout(() => setSaved(p => ({ ...p, [propertyId]: false })), 2000)
     setSaving(null)
@@ -114,7 +115,8 @@ export default function ThresholdsPage() {
       threshold_per_unit: threshold,
       effective_date: effectiveDate,
     }))
-    await supabase.from('payroll_property_thresholds').insert(rows)
+    const { error: bulkErr } = await supabase.from('payroll_property_thresholds').insert(rows)
+    if (bulkErr) { setBulkSaving(false); throw bulkErr }
     setBulkValue('')
     setBulkSaving(false)
     await load()

@@ -43,11 +43,12 @@ export function usePayrollEmployees(includeInactive = false) {
       const newRate = emp.hourly_rate ?? emp.weekly_rate
       const oldRate = current?.hourly_rate ?? current?.weekly_rate
       if (newRate !== undefined && newRate !== null && newRate !== oldRate) {
-        await supabase.from('payroll_employee_rates').insert({
+        const { error: rateErr } = await supabase.from('payroll_employee_rates').insert({
           employee_id: emp.id,
           rate: newRate,
           effective_date: new Date().toISOString().split('T')[0],
         })
+        if (rateErr) throw new Error(rateErr.message)
       }
       await fetch()
       return emp.id
@@ -61,11 +62,12 @@ export function usePayrollEmployees(includeInactive = false) {
       // Log initial rate for new employees
       const initialRate = emp.hourly_rate ?? emp.weekly_rate
       if (inserted && initialRate) {
-        await supabase.from('payroll_employee_rates').insert({
+        const { error: rateErr } = await supabase.from('payroll_employee_rates').insert({
           employee_id: inserted.id,
           rate: initialRate,
           effective_date: new Date().toISOString().split('T')[0],
         })
+        if (rateErr) throw new Error(rateErr.message)
       }
       await fetch()
       return inserted.id

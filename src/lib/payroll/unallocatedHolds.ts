@@ -166,7 +166,7 @@ export async function applyUnallocatedHolds(
       error = res.status === 'failed' ? res.error : null
     }
 
-    await admin.from('payroll_notifications').insert({
+    const { error: notifErr } = await admin.from('payroll_notifications').insert({
       payroll_week_id: opts.weekId,
       employee_id: emp.employee_id,
       channel: 'sms',
@@ -179,6 +179,7 @@ export async function applyUnallocatedHolds(
       created_by: opts.userId,
       sent_at: status === 'sent' ? new Date().toISOString() : null,
     })
+    if (notifErr) console.error('payroll_notifications insert failed', notifErr)
 
     held.push({
       employee_id: emp.employee_id,

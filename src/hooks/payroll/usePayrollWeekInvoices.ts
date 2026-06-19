@@ -143,7 +143,7 @@ export function usePayrollWeekInvoices(weekId: string) {
       }
 
       for (const pc of props) {
-        await supabase.from('payroll_invoice_line_items').upsert({
+        const { error: lineErr } = await supabase.from('payroll_invoice_line_items').upsert({
           invoice_id: invoiceId,
           property_id: pc.property_id,
           description: `${pc.property_code} — ${pc.property_name}`,
@@ -153,10 +153,12 @@ export function usePayrollWeekInvoices(weekId: string) {
           mgmt_fee_amount: pc.mgmt_fee,
           total_amount: pc.total_cost,
         })
+        if (lineErr) continue
       }
     }
 
-    await supabase.from('payroll_weeks').update({ status: 'invoiced' }).eq('id', weekId)
+    const { error: weekUpdateErr } = await supabase.from('payroll_weeks').update({ status: 'invoiced' }).eq('id', weekId)
+    if (weekUpdateErr) { setError(weekUpdateErr.message); setGenerating(false); return }
     await refetchInvoices()
     setGenerating(false)
   }, [weekId, propertyCosts])
@@ -171,12 +173,13 @@ export function usePayrollWeekInvoices(weekId: string) {
     }
     const supabase = createClient()
     const userId = (await supabase.auth.getUser()).data.user?.id
-    await supabase.from('payroll_approvals').insert({
+    const { error: approvalErr } = await supabase.from('payroll_approvals').insert({
       payroll_week_id: weekId,
       stage: 'invoice',
       approved_by: userId,
       approved_at: new Date().toISOString(),
     })
+    if (approvalErr) { setError(approvalErr.message); setApprovingAll(false); return }
     setApprovingAll(false)
   }, [weekId])
 
