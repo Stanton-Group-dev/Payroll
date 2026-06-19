@@ -11,7 +11,7 @@ const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frid
 
 export default function MgmtFeePage() {
   const { configs, portfolios, loading, addRate } = useAdminMgmtFee()
-  const { config: globalConfig, properties, users, loading: gcLoading, saveCutoff, setPropertyApprover } = useAdminGlobalConfig()
+  const { config: globalConfig, properties, users, loading: gcLoading, saveCutoff, savePrefundToggle, setPropertyApprover } = useAdminGlobalConfig()
 
   // Mgmt fee form
   const [showForm, setShowForm] = useState(false)
@@ -26,14 +26,21 @@ export default function MgmtFeePage() {
   const [cutoffSaved, setCutoffSaved] = useState(false)
   const [cutoffError, setCutoffError] = useState<string | null>(null)
 
+  // Prefund toggle
+  const [prefundIncludesMgmtFee, setPrefundIncludesMgmtFee] = useState(true)
+  const [savingPrefund, setSavingPrefund] = useState(false)
+  const [prefundSaved, setPrefundSaved] = useState(false)
+  const [prefundError, setPrefundError] = useState<string | null>(null)
+
   // Approver filter
   const [approverFilter, setApproverFilter] = useState('')
 
-  // Initialise cutoff form from loaded config
+  // Initialise cutoff form and prefund toggle from loaded config
   useEffect(() => {
     if (globalConfig) {
       setCutoffDay(String(globalConfig.expense_cutoff_day ?? 3))
       setCutoffTime((globalConfig.expense_cutoff_time ?? '17:00:00').slice(0, 5))
+      setPrefundIncludesMgmtFee(globalConfig.prefund_includes_mgmt_fee ?? true)
     }
   }, [globalConfig])
 
@@ -65,6 +72,20 @@ export default function MgmtFeePage() {
       setCutoffError(e instanceof Error ? e.message : 'Save failed')
     } finally {
       setSavingCutoff(false)
+    }
+  }
+
+  const handleSavePrefund = async () => {
+    setSavingPrefund(true)
+    setPrefundError(null)
+    try {
+      await savePrefundToggle(prefundIncludesMgmtFee)
+      setPrefundSaved(true)
+      setTimeout(() => setPrefundSaved(false), 2500)
+    } catch (e: unknown) {
+      setPrefundError(e instanceof Error ? e.message : 'Save failed')
+    } finally {
+      setSavingPrefund(false)
     }
   }
 
@@ -219,6 +240,40 @@ export default function MgmtFeePage() {
             </div>
           )}
           {cutoffError && <InfoBlock variant="error">{cutoffError}</InfoBlock>}
+        </div>
+
+        {/* ── Prefund Toggle ───────────────────────────────────────────── */}
+        <div className="mt-10">
+          <SectionDivider label="Required Pre-Fund Calculation" />
+          <InfoBlock variant="default" title="Management fee in pre-fund">
+            When enabled, the Required Pre-Fund amount on the payroll review page includes the management fee
+            (gross pay + tax + workers&apos; comp + mgmt fee). Disable to exclude the fee from the pre-fund figure.
+          </InfoBlock>
+          {gcLoading ? (
+            <div className="text-sm text-[var(--muted)] py-4">Loading…</div>
+          ) : (
+            <div className="flex items-end gap-4 mt-4">
+              <FormField label="Include management fee in required prefund">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={prefundIncludesMgmtFee}
+                    onChange={e => setPrefundIncludesMgmtFee(e.target.checked)}
+                    className="h-4 w-4 accent-[var(--primary)]"
+                  />
+                  <span className="text-sm text-[var(--primary)]">
+                    {prefundIncludesMgmtFee ? 'Enabled — fee included in pre-fund' : 'Disabled — fee excluded from pre-fund'}
+                  </span>
+                </label>
+              </FormField>
+              <div className="mb-4">
+                <FormButton onClick={handleSavePrefund} loading={savingPrefund}>
+                  {prefundSaved ? <><Check size={13} className="mr-1 inline" />Saved</> : 'Save'}
+                </FormButton>
+              </div>
+            </div>
+          )}
+          {prefundError && <InfoBlock variant="error">{prefundError}</InfoBlock>}
         </div>
 
         {/* ── Property Expense Approvers ────────────────────────────────── */}

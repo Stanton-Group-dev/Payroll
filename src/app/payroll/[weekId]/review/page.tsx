@@ -40,7 +40,7 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
   const { weekId } = use(params)
   const {
     week, employees, entries, adjustments, feeConfigs, properties, employeeRates,
-    mileageReimbursements, excludedPropertyIds, salariedDeptSplits,
+    mileageReimbursements, excludedPropertyIds, salariedDeptSplits, prefundIncludesMgmtFee,
     approved, pendingCount, unresolvedCount, loading, approving, approvingTimesheet,
     approvePayroll, approveTimesheet, refetch,
   } = usePayrollWeekReview(weekId)
@@ -60,8 +60,8 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
       ...emp,
       hourly_rate: resolveRateAsOf(emp.id, weekStart, employeeRates, emp.hourly_rate ?? 0),
     }))
-    return calculatePayroll(employeesWithHistoricalRates, entries, adjustments, feeConfigs, properties, mileageReimbursements, salariedDeptSplits)
-  }, [employees, employeeRates, week, entries, adjustments, feeConfigs, properties, mileageReimbursements, salariedDeptSplits])
+    return calculatePayroll(employeesWithHistoricalRates, entries, adjustments, feeConfigs, properties, mileageReimbursements, salariedDeptSplits, weekStart, prefundIncludesMgmtFee)
+  }, [employees, employeeRates, week, entries, adjustments, feeConfigs, properties, mileageReimbursements, salariedDeptSplits, prefundIncludesMgmtFee])
 
   const [empSort, setEmpSort] = useState<{ key: keyof EmployeePaySummary; dir: 'asc' | 'desc' } | null>(null)
   const toggleEmpSort = (key: keyof EmployeePaySummary) =>
@@ -198,7 +198,7 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
                 {formatCurrency(result.required_prefund)}
               </p>
               <p className="text-xs text-[var(--muted)]">
-                Gross Pay {formatCurrency(result.total_gross_pay)} + Payroll Tax {formatCurrency(result.total_payroll_tax)} + Workers&apos; Comp {formatCurrency(result.total_workers_comp)}
+                Gross Pay {formatCurrency(result.total_gross_pay)} + Payroll Tax {formatCurrency(result.total_payroll_tax)} + Workers&apos; Comp {formatCurrency(result.total_workers_comp)}{prefundIncludesMgmtFee ? <> + Mgmt Fee {formatCurrency(result.total_mgmt_fee)}</> : null}
               </p>
               <p className="text-xs text-[var(--warning)] mt-2">
                 ADP pulls from bank before LLC transfers arrive — fund this amount before submitting to ADP.

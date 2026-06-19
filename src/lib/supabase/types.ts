@@ -472,6 +472,7 @@ export interface PayrollGlobalConfig {
   id: string
   expense_cutoff_day: number | null
   expense_cutoff_time: string | null
+  prefund_includes_mgmt_fee: boolean
   created_at: string
   updated_at: string
   created_by: string | null

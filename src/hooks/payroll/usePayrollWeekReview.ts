@@ -32,6 +32,7 @@ export function usePayrollWeekReview(weekId: string) {
   const [mileageReimbursements, setMileageReimbursements] = useState<PayrollMileageReimbursement[]>([])
   const [heldEmployeeIds, setHeldEmployeeIds] = useState<Set<string>>(new Set())
   const [waivedEmployeeIds, setWaivedEmployeeIds] = useState<Set<string>>(new Set())
+  const [prefundIncludesMgmtFee, setPrefundIncludesMgmtFee] = useState(true)
   // Dept splits drive the per-department breakdown of the Administrative (spread) line.
   type DeptSplitRow = { employee_id: string; department: string; allocation_pct: number; effective_date?: string }
   const [defaultDeptSplits, setDefaultDeptSplits] = useState<DeptSplitRow[]>([])
@@ -48,7 +49,7 @@ export function usePayrollWeekReview(weekId: string) {
     setLoading(true)
     setError(null)
     const supabase = createClient()
-    const [weekRes, empRes, entRes, adjRes, feeRes, propRes, portRes, approvalRes, ratesRes, mileageRes, holdsRes, splitRes, ovRes] = await Promise.all([
+    const [weekRes, empRes, entRes, adjRes, feeRes, propRes, portRes, approvalRes, ratesRes, mileageRes, holdsRes, splitRes, ovRes, globalConfigRes] = await Promise.all([
       supabase.from('payroll_weeks').select('*').eq('id', weekId).single(),
       supabase.from('payroll_employees').select('*').eq('is_active', true),
       supabase.from('payroll_time_entries').select('*').eq('payroll_week_id', weekId).eq('is_flagged', false).eq('is_active', true),
@@ -62,6 +63,7 @@ export function usePayrollWeekReview(weekId: string) {
       supabase.from('payroll_employee_holds').select('employee_id, status').eq('payroll_week_id', weekId).in('status', ['held', 'waived']),
       supabase.from('payroll_employee_dept_splits').select('employee_id, department, allocation_pct, effective_date'),
       supabase.from('payroll_dept_split_overrides').select('employee_id, department, allocation_pct').eq('payroll_week_id', weekId).eq('is_active', true),
+      supabase.from('payroll_global_config').select('prefund_includes_mgmt_fee').order('created_at', { ascending: false }).limit(1).maybeSingle(),
     ])
     if (weekRes.error) { setError(weekRes.error.message); setLoading(false); return }
     setWeek(weekRes.data)
@@ -109,6 +111,7 @@ export function usePayrollWeekReview(weekId: string) {
     setMileageReimbursements(mileageRes.data ?? [])
     setDefaultDeptSplits((splitRes.data ?? []) as DeptSplitRow[])
     setDeptSplitOverrides((ovRes.data ?? []) as DeptSplitRow[])
+    setPrefundIncludesMgmtFee(globalConfigRes.data?.prefund_includes_mgmt_fee ?? true)
     setApproved((approvalRes.data?.length ?? 0) > 0)
     // Count the two kinds of open work that block timesheet/payroll approval:
     // pending (parked) entries, and unallocated entries (no property assigned yet).
@@ -234,7 +237,7 @@ export function usePayrollWeekReview(weekId: string) {
   return {
     week, employees, entries, adjustments, feeConfigs, properties, employeeRates,
     mileageReimbursements, excludedPropertyIds, heldEmployeeIds, waivedEmployeeIds,
-    salariedDeptSplits,
+    salariedDeptSplits, prefundIncludesMgmtFee,
     approved, pendingCount, unresolvedCount, loading, error, approving, approvingTimesheet,
     approvePayroll, approveTimesheet, refetch: load,
   }
