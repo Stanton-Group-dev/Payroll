@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
 import { fetchWorkyardTimecards, isWorkyardApiError } from '@/lib/payroll/workyard-api'
 import { isWorkyardMockEnabled } from '@/lib/payroll/workyard-mock'
 
 export async function GET(req: NextRequest) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   const weekStart = req.nextUrl.searchParams.get('weekStart')
   if (!weekStart || !/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) {
     return NextResponse.json({ error: 'weekStart param required (YYYY-MM-DD)' }, { status: 400 })

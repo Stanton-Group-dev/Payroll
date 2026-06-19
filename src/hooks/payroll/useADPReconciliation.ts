@@ -98,17 +98,19 @@ export function useADPReconciliation(weekId: string) {
 
     let reconId: string
     if (reconciliation) {
-      await supabase.from('payroll_adp_reconciliation').update({
+      const { error: updErr } = await supabase.from('payroll_adp_reconciliation').update({
         system_gross_total: systemTotal,
         adp_gross_total: Math.round(adpGrandTotal * 100) / 100,
         variance,
         resolved: Math.abs(variance) < 0.01,
         notes,
       }).eq('id', reconciliation.id)
+      if (updErr) throw updErr
       reconId = reconciliation.id
-      await supabase.from('payroll_adp_recon_rows').delete().eq('reconciliation_id', reconId)
+      const { error: delErr } = await supabase.from('payroll_adp_recon_rows').delete().eq('reconciliation_id', reconId)
+      if (delErr) throw delErr
     } else {
-      const { data: ins } = await supabase.from('payroll_adp_reconciliation').insert({
+      const { data: ins, error: insErr } = await supabase.from('payroll_adp_reconciliation').insert({
         payroll_week_id: weekId,
         system_gross_total: systemTotal,
         adp_gross_total: Math.round(adpGrandTotal * 100) / 100,
@@ -116,10 +118,11 @@ export function useADPReconciliation(weekId: string) {
         resolved: Math.abs(variance) < 0.01,
         notes,
       }).select().single()
+      if (insErr) throw insErr
       reconId = ins!.id
     }
 
-    await supabase.from('payroll_adp_recon_rows').insert(
+    const { error: rowsErr } = await supabase.from('payroll_adp_recon_rows').insert(
       previewRows.map(r => ({
         reconciliation_id: reconId,
         employee_name: r.employee_name,
@@ -127,6 +130,7 @@ export function useADPReconciliation(weekId: string) {
         adp_gross: r.adp_gross,
       }))
     )
+    if (rowsErr) throw rowsErr
     await load()
   }, [weekId, systemTotal, reconciliation, load])
 
@@ -134,14 +138,16 @@ export function useADPReconciliation(weekId: string) {
     const supabase = createClient()
     const variance = Math.round((systemTotal - adpTotal) * 100) / 100
     if (reconciliation) {
-      await supabase.from('payroll_adp_reconciliation').update({
+      const { error: updErr } = await supabase.from('payroll_adp_reconciliation').update({
         adp_gross_total: adpTotal, system_gross_total: systemTotal, variance, notes, resolved: Math.abs(variance) < 0.01,
       }).eq('id', reconciliation.id)
+      if (updErr) throw updErr
     } else {
-      await supabase.from('payroll_adp_reconciliation').insert({
+      const { error: insErr } = await supabase.from('payroll_adp_reconciliation').insert({
         payroll_week_id: weekId, system_gross_total: systemTotal, adp_gross_total: adpTotal, variance,
         resolved: Math.abs(variance) < 0.01, notes,
       })
+      if (insErr) throw insErr
     }
     await load()
   }, [weekId, systemTotal, reconciliation, load])
@@ -149,7 +155,8 @@ export function useADPReconciliation(weekId: string) {
   const markResolved = useCallback(async () => {
     if (!reconciliation) return
     const supabase = createClient()
-    await supabase.from('payroll_adp_reconciliation').update({ resolved: true }).eq('id', reconciliation.id)
+    const { error: resolveErr } = await supabase.from('payroll_adp_reconciliation').update({ resolved: true }).eq('id', reconciliation.id)
+    if (resolveErr) throw resolveErr
     setReconciliation(prev => prev ? { ...prev, resolved: true } : prev)
   }, [reconciliation])
 

@@ -214,16 +214,19 @@ export function usePayrollWeekReview(weekId: string) {
         cost_per_unit: pc.cost_per_unit,
       }))
     if (costRows.length > 0) {
-      await supabase.from('payroll_weekly_property_costs').upsert(costRows)
+      const { error: costsErr } = await supabase.from('payroll_weekly_property_costs').upsert(costRows)
+      if (costsErr) throw new Error(costsErr.message)
     }
 
-    await supabase.from('payroll_approvals').insert({
+    const { error: approvalErr } = await supabase.from('payroll_approvals').insert({
       payroll_week_id: weekId,
       stage: 'payroll',
       approved_by: userId,
       approved_at: new Date().toISOString(),
     })
-    await supabase.from('payroll_weeks').update({ status: 'payroll_approved' }).eq('id', weekId)
+    if (approvalErr) throw new Error(approvalErr.message)
+    const { error: weekErr } = await supabase.from('payroll_weeks').update({ status: 'payroll_approved' }).eq('id', weekId)
+    if (weekErr) throw new Error(weekErr.message)
     setApproved(true)
     setApproving(false)
   }, [weekId, pendingCount])

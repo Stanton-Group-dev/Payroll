@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
 import { isWorkyardMockEnabled, generateMockEmployees } from '@/lib/payroll/workyard-mock'
 
 const BASE_URL = 'https://api.workyard.com'
@@ -70,6 +71,10 @@ function mapV1(e: WYEmployeeV1): WYEmployeeBasic {
 }
 
 export async function GET() {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   // Prefer real Workyard whenever creds are present — the v1 employees endpoint
   // returns the actual pay_rate. The mock is only a no-creds fallback so the
   // sync flow still works offline. (WORKYARD_MOCK governs timecards separately.)

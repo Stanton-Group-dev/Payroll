@@ -71,7 +71,7 @@ export function useTimesheetCorrections(weekId: string | null) {
     fromPropertyId?: string
   ) => {
     const supabase = createClient()
-    await supabase.from('payroll_timesheet_corrections').insert({
+    const { error: insertErr } = await supabase.from('payroll_timesheet_corrections').insert({
       time_entry_id: entryId,
       from_property_id: fromPropertyId ?? null,
       to_property_id: toPropertyId,
@@ -80,10 +80,12 @@ export function useTimesheetCorrections(weekId: string | null) {
       corrected_by: (await supabase.auth.getUser()).data.user?.id,
       corrected_at: new Date().toISOString(),
     })
-    await supabase
+    if (insertErr) throw insertErr
+    const { error: updateErr } = await supabase
       .from('payroll_time_entries')
       .update({ is_flagged: false, property_id: toPropertyId })
       .eq('id', entryId)
+    if (updateErr) throw updateErr
     await fetch()
   }, [fetch])
 

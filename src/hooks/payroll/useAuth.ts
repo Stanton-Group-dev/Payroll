@@ -10,7 +10,7 @@ export interface AuthProfile {
   id: string
   email: string | null
   full_name: string | null
-  role: UserRole
+  role: UserRole | null
   is_active: boolean
 }
 
@@ -42,17 +42,15 @@ export function useAuth() {
           id: data.id,
           email: data.email ?? u.email ?? null,
           full_name: data.full_name,
-          role: (data.role as UserRole) ?? 'manager',
-          is_active: data.is_active ?? true,
+          // Fail closed: a profile row with no role grants NO access (was `?? 'manager'`,
+          // which combined with the DB fail-open let any session act as a manager).
+          role: (data.role as UserRole) ?? null,
+          // Fail closed: missing is_active is treated as inactive (was `?? true`).
+          is_active: data.is_active ?? false,
         })
       } else {
-        setProfile({
-          id: u.id,
-          email: u.email ?? null,
-          full_name: u.user_metadata?.full_name ?? null,
-          role: 'manager',
-          is_active: true,
-        })
+        // No profile row -> no role, no access (previously synthesized a manager/active profile).
+        setProfile(null)
       }
     }
 

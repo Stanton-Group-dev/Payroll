@@ -301,18 +301,20 @@ export function useExpenseApprovals() {
     // mixed batches stay approved but get a bookkeeping audit record
     if (companyItems.length > 0) {
       if (personalItems.length === 0) {
-        await supabase
+        const { error: bokErr } = await supabase
           .from('payroll_expense_submissions')
           .update({ status: 'bookkeeping_only' })
           .eq('id', submission.id)
+        if (bokErr) throw new Error(`Failed to update submission to bookkeeping_only: ${bokErr.message}`)
       } else {
-        await supabase.from('payroll_expense_approvals').insert({
+        const { error: routeAuditErr } = await supabase.from('payroll_expense_approvals').insert({
           submission_id: submission.id,
           action: 'routed_to_bookkeeping' as ExpenseApprovalAction,
           actioned_by: userId,
           notes: `${companyItems.length} company card item(s) in approved batch flagged for bookkeeping reconciliation.`,
           created_by: userId,
         })
+        if (routeAuditErr) throw new Error(`Failed to insert bookkeeping audit record: ${routeAuditErr.message}`)
       }
     }
 
@@ -324,14 +326,16 @@ export function useExpenseApprovals() {
   const rejectSubmission = useCallback(async (submissionId: string, notes: string) => {
     const supabase = createClient()
     const userId = (await supabase.auth.getUser()).data.user?.id ?? ''
-    await supabase.from('payroll_expense_approvals').insert({
+    const { error: approvalErr } = await supabase.from('payroll_expense_approvals').insert({
       submission_id: submissionId,
       action: 'rejected' as ExpenseApprovalAction,
       actioned_by: userId,
       notes,
       created_by: userId,
     })
-    await supabase.from('payroll_expense_submissions').update({ status: 'rejected' }).eq('id', submissionId)
+    if (approvalErr) throw new Error(`Failed to insert rejection approval record: ${approvalErr.message}`)
+    const { error: statusErr } = await supabase.from('payroll_expense_submissions').update({ status: 'rejected' }).eq('id', submissionId)
+    if (statusErr) throw new Error(`Failed to update submission status to rejected: ${statusErr.message}`)
     await fetchPending()
   }, [fetchPending])
 
@@ -339,17 +343,19 @@ export function useExpenseApprovals() {
   const requestCorrection = useCallback(async (submissionId: string, notes: string) => {
     const supabase = createClient()
     const userId = (await supabase.auth.getUser()).data.user?.id ?? ''
-    await supabase.from('payroll_expense_approvals').insert({
+    const { error: approvalErr } = await supabase.from('payroll_expense_approvals').insert({
       submission_id: submissionId,
       action: 'correction_requested' as ExpenseApprovalAction,
       actioned_by: userId,
       notes,
       created_by: userId,
     })
-    await supabase
+    if (approvalErr) throw new Error(`Failed to insert correction_requested approval record: ${approvalErr.message}`)
+    const { error: statusErr } = await supabase
       .from('payroll_expense_submissions')
       .update({ status: 'correction_requested' })
       .eq('id', submissionId)
+    if (statusErr) throw new Error(`Failed to update submission status to correction_requested: ${statusErr.message}`)
     await fetchPending()
   }, [fetchPending])
 
@@ -362,14 +368,16 @@ export function useExpenseApprovals() {
   ) => {
     const supabase = createClient()
     const userId = (await supabase.auth.getUser()).data.user?.id ?? ''
-    await supabase.from('payroll_expense_items').update({ payment_method: resolvedMethod }).eq('id', itemId)
-    await supabase.from('payroll_expense_approvals').insert({
+    const { error: itemErr } = await supabase.from('payroll_expense_items').update({ payment_method: resolvedMethod }).eq('id', itemId)
+    if (itemErr) throw new Error(`Failed to update payment method on expense item: ${itemErr.message}`)
+    const { error: approvalErr } = await supabase.from('payroll_expense_approvals').insert({
       submission_id: submissionId,
       action: 'payment_method_resolved' as ExpenseApprovalAction,
       actioned_by: userId,
       notes,
       created_by: userId,
     })
+    if (approvalErr) throw new Error(`Failed to insert payment_method_resolved approval record: ${approvalErr.message}`)
     await fetchPending()
   }, [fetchPending])
 
@@ -377,17 +385,19 @@ export function useExpenseApprovals() {
   const routeToBookkeeping = useCallback(async (submissionId: string, notes: string) => {
     const supabase = createClient()
     const userId = (await supabase.auth.getUser()).data.user?.id ?? ''
-    await supabase.from('payroll_expense_approvals').insert({
+    const { error: approvalErr } = await supabase.from('payroll_expense_approvals').insert({
       submission_id: submissionId,
       action: 'routed_to_bookkeeping' as ExpenseApprovalAction,
       actioned_by: userId,
       notes: notes || null,
       created_by: userId,
     })
-    await supabase
+    if (approvalErr) throw new Error(`Failed to insert routed_to_bookkeeping approval record: ${approvalErr.message}`)
+    const { error: statusErr } = await supabase
       .from('payroll_expense_submissions')
       .update({ status: 'bookkeeping_only' })
       .eq('id', submissionId)
+    if (statusErr) throw new Error(`Failed to update submission status to bookkeeping_only: ${statusErr.message}`)
     await fetchPending()
     await fetchBookkeeping()
   }, [fetchPending, fetchBookkeeping])

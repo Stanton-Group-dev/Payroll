@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
 import { fetchDumpsterOverflowByProperty, isWorkyardApiError } from '@/lib/payroll/workyard-api'
 import { isWorkyardMockEnabled } from '@/lib/payroll/workyard-mock'
 
@@ -11,6 +12,10 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
  * Workyard. `end` is exclusive. Feeds the dumpster sizing report.
  */
 export async function GET(req: NextRequest) {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
   const start = req.nextUrl.searchParams.get('start')
   const end = req.nextUrl.searchParams.get('end')
 

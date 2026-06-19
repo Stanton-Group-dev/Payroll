@@ -49,12 +49,13 @@ export function useDeptSplitOverrides(weekId: string | null) {
     const userId = (await supabase.auth.getUser()).data.user?.id
 
     // Soft-delete existing overrides for this employee + week
-    await supabase
+    const { error: softDeleteErr } = await supabase
       .from('payroll_dept_split_overrides')
       .update({ is_active: false })
       .eq('payroll_week_id', weekId)
       .eq('employee_id', employeeId)
       .eq('is_active', true)
+    if (softDeleteErr) throw new Error(softDeleteErr.message)
 
     // Insert new rows
     if (rows.length > 0) {
@@ -76,12 +77,13 @@ export function useDeptSplitOverrides(weekId: string | null) {
   const deleteOverrides = useCallback(async (employeeId: string) => {
     if (!weekId) return
     const supabase = createClient()
-    await supabase
+    const { error: deleteErr } = await supabase
       .from('payroll_dept_split_overrides')
       .update({ is_active: false })
       .eq('payroll_week_id', weekId)
       .eq('employee_id', employeeId)
       .eq('is_active', true)
+    if (deleteErr) throw new Error(deleteErr.message)
     await fetch()
   }, [weekId, fetch])
 

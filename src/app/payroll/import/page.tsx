@@ -233,7 +233,7 @@ export default function ImportPage() {
       if (row.status === 'unmatched_employee') { errors++; continue }
 
       try {
-        await supabase.from('payroll_time_entries').insert({
+        const { error: insertErr } = await supabase.from('payroll_time_entries').insert({
           payroll_week_id: selectedWeekId,
           employee_id: row.employeeId!,
           property_id: row.propertyId ?? null,
@@ -250,6 +250,7 @@ export default function ImportPage() {
           cost_code: row.costCode || null,
           cost_code_name: row.costCodeName || null,
         })
+        if (insertErr) throw new Error(insertErr.message)
         if (row.status === 'flagged') flagged++
         else imported++
       } catch {
