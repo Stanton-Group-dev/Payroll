@@ -193,6 +193,35 @@ describe('calculatePayroll — golden week 2026-06-08', () => {
 })
 
 // ---------------------------------------------------------------------------
+// PRP-02 CF-7/CF-8 regression: recon/export consumer sees engine gross_pay,
+// not the old loop that added advances instead of subtracting them.
+// ---------------------------------------------------------------------------
+describe('recon/export engine alignment — advance employee (PRP-02)', () => {
+  it('engine gross_pay for advance employee is 1000 (advances subtracted, not added)', () => {
+    // The old local loop in useADPReconciliation had a bug: it added adj.amount
+    // unconditionally, which for a $100 advance would yield 1100 instead of 1000.
+    // After the refactor, both recon and export delegate to calculatePayroll.
+    // This assertion documents that the engine-derived gross equals 1000 — i.e.
+    // recon == export == engine on a week that contains an advance.
+    const result = calculatePayroll(
+      [employee],
+      [timeEntry],
+      [advanceAdjustment],
+      mgmtFeeConfigs,
+      [property],
+      [],
+      {},
+      WEEK_START,
+    )
+    const e = result.employee_summaries[0]
+    // gross = regular_wages(800) + ot_wages(300) - advance(100) = 1000
+    expect(e.gross_pay).toBe(1000)
+    // Confirm advances are captured separately (not added to gross)
+    expect(e.advances).toBe(100)
+  })
+})
+
+// ---------------------------------------------------------------------------
 // getMgmtFeeRate asOf unit test (C-5)
 // ---------------------------------------------------------------------------
 describe('getMgmtFeeRate — asOf effective-date filtering', () => {
