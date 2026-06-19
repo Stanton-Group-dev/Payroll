@@ -41,6 +41,7 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
   const {
     week, employees, entries, adjustments, feeConfigs, properties, employeeRates,
     mileageReimbursements, excludedPropertyIds, salariedDeptSplits, prefundIncludesMgmtFee,
+    rateSettings,
     approved, pendingCount, unresolvedCount, loading, approving, approvingTimesheet,
     approvePayroll, approveTimesheet, refetch,
   } = usePayrollWeekReview(weekId)
@@ -60,8 +61,8 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
       ...emp,
       hourly_rate: resolveRateAsOf(emp.id, weekStart, employeeRates, emp.hourly_rate ?? 0),
     }))
-    return calculatePayroll(employeesWithHistoricalRates, entries, adjustments, feeConfigs, properties, mileageReimbursements, salariedDeptSplits, weekStart, prefundIncludesMgmtFee)
-  }, [employees, employeeRates, week, entries, adjustments, feeConfigs, properties, mileageReimbursements, salariedDeptSplits, prefundIncludesMgmtFee])
+    return calculatePayroll(employeesWithHistoricalRates, entries, adjustments, feeConfigs, properties, mileageReimbursements, salariedDeptSplits, weekStart, prefundIncludesMgmtFee, rateSettings)
+  }, [employees, employeeRates, week, entries, adjustments, feeConfigs, properties, mileageReimbursements, salariedDeptSplits, prefundIncludesMgmtFee, rateSettings])
 
   const [empSort, setEmpSort] = useState<{ key: keyof EmployeePaySummary; dir: 'asc' | 'desc' } | null>(null)
   const toggleEmpSort = (key: keyof EmployeePaySummary) =>

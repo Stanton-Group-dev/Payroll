@@ -8,7 +8,7 @@ import type {
   PayrollMileageReimbursement,
   Property,
 } from '@/lib/supabase/types'
-import { PAYROLL_TAX_RATE, WORKERS_COMP_RATE, DEFAULT_MILEAGE_RATE } from '@/lib/payroll/config'
+import { PAYROLL_TAX_RATE, WORKERS_COMP_RATE, PHONE_REIMBURSEMENT_AMOUNT, DEFAULT_MILEAGE_RATE } from '@/lib/payroll/config'
 
 /**
  * Given an employee's rate history and a week start date, return the rate
@@ -152,8 +152,27 @@ export function calculatePayroll(
   /** When true (default), total_mgmt_fee is included in required_prefund (OD-5:
    *  management fee collected at prefund time). Pass false to compute prefund as
    *  gross + tax + WC only. */
-  prefundIncludesMgmtFee: boolean = true
+  prefundIncludesMgmtFee: boolean = true,
+  /**
+   * Optional overrides for rate constants that are stored in payroll_global_config.
+   * When not provided each field falls back to the corresponding config.ts constant so
+   * all existing callers (including the golden test) continue to use 0.08 / 0.03 / $8 / 40.
+   *
+   * NOTE: The FLSA OT multiplier (1.5×) is intentionally NOT included here — it is a
+   * legal invariant that must not be changed via configuration.
+   */
+  settings?: {
+    payrollTaxRate?: number
+    workersCompRate?: number
+    phoneAmount?: number
+    /** Weekly hours at which OT kicks in for eligible employees (default: 40 per FLSA). */
+    otThresholdHours?: number
+  }
 ): PayrollCalculationResult {
+  const effectivePayrollTaxRate   = settings?.payrollTaxRate    ?? PAYROLL_TAX_RATE
+  const effectiveWorkersCompRate  = settings?.workersCompRate   ?? WORKERS_COMP_RATE
+  const effectivePhoneAmount      = settings?.phoneAmount       ?? PHONE_REIMBURSEMENT_AMOUNT
+  const effectiveOtThreshold      = settings?.otThresholdHours  ?? 40
   const employeeMap = Object.fromEntries(employees.map(e => [e.id, e]))
   const propertyMap = Object.fromEntries(properties.map(p => [p.id, p]))
 
@@ -226,20 +245,20 @@ export function calculatePayroll(
     }
   }
 
-  // Enforce weekly overtime at the 40-hour threshold for OT-eligible employees.
-  // The imported reg/OT split (from Workyard, or hand-keyed manual entries) is NOT
-  // trustworthy — manual rows can carry OT while worked hours are under 40, or push
-  // regular over 40. So for anyone who actually earns the 1.5× premium, recompute from
-  // their weekly worked total: the first 40 worked hours are regular, the rest are OT.
-  // (PTO is separate and never counts toward the 40.) Non-OT-eligible workers —
-  // contractors, construction, salaried, ot_allowed=false — already had their hours
-  // folded into regular at straight time above and are left untouched.
+  // Enforce weekly overtime at the configured OT threshold (default 40 h) for OT-eligible
+  // employees.  The imported reg/OT split (from Workyard, or hand-keyed manual entries) is
+  // NOT trustworthy — manual rows can carry OT while worked hours are under the threshold,
+  // or push regular over it.  So for anyone who actually earns the 1.5× premium, recompute
+  // from their weekly worked total: the first <otThreshold> worked hours are regular, the
+  // rest are OT.  (PTO is separate and never counts toward the threshold.)
+  // Non-OT-eligible workers — contractors, construction, salaried, ot_allowed=false — already
+  // had their hours folded into regular at straight time above and are left untouched.
   for (const emp of employees) {
     const d = empData[emp.id]
     if (!d) continue
     if (otMultiplier(emp.type, emp.department, emp.ot_allowed) !== 1.5) continue
     const worked = d.regular_hours + d.ot_hours
-    const ot = Math.max(0, worked - 40)
+    const ot = Math.max(0, worked - effectiveOtThreshold)
     const reg = worked - ot
     const rate = emp.hourly_rate ?? 0
     d.regular_hours = reg
@@ -285,8 +304,8 @@ export function calculatePayroll(
     // received net-of-advance — advances are a payment-timing mechanism, not a
     // wage reduction.
     const taxable_base = gross_pay - d.phone_reimbursement - d.mileage_reimbursement - d.nontax_reimbursement + d.advances
-    const payroll_tax = emp.pay_tax ? taxable_base * PAYROLL_TAX_RATE : 0
-    const workers_comp = emp.wc ? taxable_base * WORKERS_COMP_RATE : 0
+    const payroll_tax = emp.pay_tax ? taxable_base * effectivePayrollTaxRate : 0
+    const workers_comp = emp.wc ? taxable_base * effectiveWorkersCompRate : 0
     // C-5: pass the week's start date so the fee rate is point-in-time, not today.
     const feeRate = getMgmtFeeRate(null, mgmtFeeConfigs, weekStart)
     // Mileage is a direct pass-through cost billed to the property at cost — the
