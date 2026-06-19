@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { assertWeekWritable } from '@/lib/payroll/weekLock'
 
 export interface DeptSplitOverride {
   id: string
@@ -46,6 +47,7 @@ export function useDeptSplitOverrides(weekId: string | null) {
   ) => {
     if (!weekId) return
     const supabase = createClient()
+    await assertWeekWritable(supabase, weekId)
     const userId = (await supabase.auth.getUser()).data.user?.id
 
     // Soft-delete existing overrides for this employee + week

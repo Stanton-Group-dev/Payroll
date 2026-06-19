@@ -9,6 +9,7 @@ import { useProperties } from '@/hooks/payroll/useProperties'
 import { PageHeader, FormButton, FormSelect, FormField, InfoBlock } from '@/components/form'
 import { createClient } from '@/lib/supabase/client'
 import { parseWorkyardCSV, isOverheadProperty, isSpreadOverheadProject, type WorkyardRow } from '@/lib/payroll/csv-parser'
+import { assertWeekWritable } from '@/lib/payroll/weekLock'
 import type { PayrollEmployee } from '@/lib/supabase/types'
 import { format } from 'date-fns'
 
@@ -227,6 +228,13 @@ export default function ImportPage() {
     setImporting(true)
 
     const supabase = createClient()
+    try {
+      await assertWeekWritable(supabase, selectedWeekId)
+    } catch (e) {
+      setParseErrors([e instanceof Error ? e.message : 'Week is locked'])
+      setImporting(false)
+      return
+    }
     let imported = 0, flagged = 0, errors = 0
 
     for (const row of preview) {

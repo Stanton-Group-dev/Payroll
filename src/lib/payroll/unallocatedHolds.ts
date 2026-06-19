@@ -9,6 +9,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { PayrollEmployeeHold, PayrollNotification } from '@/lib/supabase/types'
 import { sendSms, isTwilioLive } from '@/lib/payroll/twilio-api'
+import { assertWeekWritable } from '@/lib/payroll/weekLock'
 
 /** Below this many unallocated hours we don't hold or notify (≈15 min). */
 export const UNALLOCATED_HOLD_THRESHOLD_HOURS = 0.25
@@ -210,6 +211,7 @@ export async function waiveUnallocated(
   admin: SupabaseClient,
   opts: { weekId: string; employeeId: string; userId: string | null },
 ): Promise<{ employee_id: string; unallocated_hours: number; entries_written_off: number }> {
+  await assertWeekWritable(admin, opts.weekId)
   // The live, no-property entries for this employee/week that carry actual work hours.
   const { data: rows, error: selErr } = await admin
     .from('payroll_time_entries')
@@ -278,6 +280,7 @@ export async function unwaiveUnallocated(
   admin: SupabaseClient,
   opts: { weekId: string; employeeId: string },
 ): Promise<void> {
+  await assertWeekWritable(admin, opts.weekId)
   const { error: updErr } = await admin
     .from('payroll_time_entries')
     .update({ is_active: true, flag_reason: null })
