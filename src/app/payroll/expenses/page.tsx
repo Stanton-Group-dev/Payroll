@@ -328,7 +328,7 @@ function SubmissionRow({ sub }: { sub: PayrollExpenseSubmission }) {
                   <td className="py-2 text-[var(--muted)]">{item.payment_method.replace(/_/g, ' ')}</td>
                   <td className="py-2 text-right font-medium">${item.amount.toFixed(2)}</td>
                   <td className="py-2 text-center">
-                    <a href={item.receipt_image_url} target="_blank" rel="noopener noreferrer" className="text-[var(--primary)] hover:underline text-xs">
+                    <a href={`/api/expense-receipt?path=${encodeURIComponent(item.receipt_image_url ?? '')}`} target="_blank" rel="noopener noreferrer" className="text-[var(--primary)] hover:underline text-xs">
                       <Eye size={13} className="inline" />
                     </a>
                   </td>

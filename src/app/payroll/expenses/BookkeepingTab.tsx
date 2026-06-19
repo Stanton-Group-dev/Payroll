@@ -70,7 +70,7 @@ function BookkeepingRow({ sub }: { sub: PayrollExpenseSubmission }) {
                   <td className="py-2 text-right font-medium">${item.amount.toFixed(2)}</td>
                   <td className="py-2 text-center">
                     <a
-                      href={item.receipt_image_url}
+                      href={`/api/expense-receipt?path=${encodeURIComponent(item.receipt_image_url ?? '')}`}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="text-[var(--primary)] hover:underline text-xs"
@@ -94,7 +94,7 @@ function BookkeepingRow({ sub }: { sub: PayrollExpenseSubmission }) {
           )}
           <div className="mt-2">
             <a
-              href={sub.signature_url}
+              href={`/api/expense-receipt?path=${encodeURIComponent(sub.signature_url ?? '')}`}
               target="_blank"
               rel="noopener noreferrer"
               className="text-xs text-[var(--muted)] hover:text-[var(--primary)] hover:underline"

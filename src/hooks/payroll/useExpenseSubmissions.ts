@@ -193,7 +193,7 @@ export function useExpenseSubmissions(employeeIdFilter?: string) {
     const supabase = createClient()
     const userId = (await supabase.auth.getUser()).data.user?.id ?? ''
 
-    // 1. Upload signature
+    // 1. Upload signature — store the storage PATH (not a public URL)
     const signatureBlob = await (await fetch(params.signatureDataUrl)).blob()
     const sigPath = `signatures/${userId}/${Date.now()}.png`
     const { error: sigErr } = await supabase.storage
@@ -201,10 +201,9 @@ export function useExpenseSubmissions(employeeIdFilter?: string) {
       .upload(sigPath, signatureBlob, { contentType: 'image/png', upsert: false })
     if (sigErr) throw new Error(`Signature upload failed: ${sigErr.message}`)
 
-    const { data: sigUrlData } = supabase.storage.from('expense-receipts').getPublicUrl(sigPath)
-    const signatureUrl = sigUrlData.publicUrl
+    const signatureUrl = sigPath  // store the object path; reads go via /api/expense-receipt
 
-    // 2. Upload receipts
+    // 2. Upload receipts — store the storage PATH (not a public URL)
     const receiptUrls: string[] = []
     for (const item of params.items) {
       if (!item.receipt_file) throw new Error(`Receipt required for all items`)
@@ -214,8 +213,7 @@ export function useExpenseSubmissions(employeeIdFilter?: string) {
         .from('expense-receipts')
         .upload(path, item.receipt_file, { contentType: item.receipt_file.type, upsert: false })
       if (rErr) throw new Error(`Receipt upload failed: ${rErr.message}`)
-      const { data: rUrlData } = supabase.storage.from('expense-receipts').getPublicUrl(path)
-      receiptUrls.push(rUrlData.publicUrl)
+      receiptUrls.push(path)  // store the object path; reads go via /api/expense-receipt
     }
 
     // 3. Compute total
