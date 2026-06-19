@@ -52,7 +52,10 @@ create or replace function public.payroll_is_admin()
   security definer
   set search_path = public, pg_temp
 as $$
-  select coalesce(public.payroll_get_role() = 'admin', false)
+  -- PATCHED 2026-06-19: include 'superadmin' — the live functions gained it via the
+  -- superadmin_role_hierarchy migration (applied 2026-06-18) AFTER this file was authored
+  -- (2026-06-13). Applying the original (= 'admin') would silently regress superadmin access.
+  select coalesce(public.payroll_get_role() in ('superadmin', 'admin'), false)
 $$;
 
 create or replace function public.payroll_is_manager_or_above()
@@ -62,7 +65,8 @@ create or replace function public.payroll_is_manager_or_above()
   security definer
   set search_path = public, pg_temp
 as $$
-  select coalesce(public.payroll_get_role() in ('admin', 'manager'), false)
+  -- PATCHED 2026-06-19: include 'superadmin' (see note on payroll_is_admin above).
+  select coalesce(public.payroll_get_role() in ('superadmin', 'admin', 'manager'), false)
 $$;
 
 -- (3) Revoke unauthenticated write grants on every payroll_* base table in `public`.

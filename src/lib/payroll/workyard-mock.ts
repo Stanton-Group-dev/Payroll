@@ -100,6 +100,7 @@ function mkRow(
     ptoHours: 0,
     timecardId,
     costCode: 'LABOR',
+    costCodeName: 'Labor',
   }
 }
 

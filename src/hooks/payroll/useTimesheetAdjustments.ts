@@ -145,7 +145,8 @@ export function useTimesheetAdjustments(weekId: string | null) {
         corrected_by: userId,
         corrected_at: new Date().toISOString(),
       }))
-      await supabase.from('payroll_timesheet_corrections').insert(corrRows)
+      const { error: corrSplitErr } = await supabase.from('payroll_timesheet_corrections').insert(corrRows)
+      if (corrSplitErr) console.error('payroll_timesheet_corrections insert (split)', corrSplitErr)
     } else {
       // Simple reassign
       const { error: updErr } = await supabase
@@ -161,7 +162,7 @@ export function useTimesheetAdjustments(weekId: string | null) {
         .eq('id', entryId)
       if (updErr) throw new Error(updErr.message)
 
-      await supabase.from('payroll_timesheet_corrections').insert({
+      const { error: corrReassignErr } = await supabase.from('payroll_timesheet_corrections').insert({
         time_entry_id: entryId,
         from_property_id: entry.property_id,
         to_property_id: splits[0].propertyId,
@@ -171,6 +172,7 @@ export function useTimesheetAdjustments(weekId: string | null) {
         corrected_by: userId,
         corrected_at: new Date().toISOString(),
       })
+      if (corrReassignErr) console.error('payroll_timesheet_corrections insert (reassign)', corrReassignErr)
     }
 
     await refetch()
@@ -277,13 +279,15 @@ export function useTimesheetAdjustments(weekId: string | null) {
       const srcTotal = src ? (src.regular_hours ?? 0) + (src.ot_hours ?? 0) : 0
       const remainder = parseFloat((srcTotal - params.totalHours).toFixed(2))
       if (src && remainder > 0.01) {
-        await supabase.from('payroll_time_entries')
+        const { error: srcPartialErr } = await supabase.from('payroll_time_entries')
           .update({ regular_hours: remainder, ot_hours: 0 })
           .eq('id', params.sourceEntryId)
+        if (srcPartialErr) throw new Error(srcPartialErr.message)
       } else {
-        await supabase.from('payroll_time_entries')
+        const { error: srcDeactErr } = await supabase.from('payroll_time_entries')
           .update({ is_active: false })
           .eq('id', params.sourceEntryId)
+        if (srcDeactErr) throw new Error(srcDeactErr.message)
       }
     }
 
@@ -303,7 +307,7 @@ export function useTimesheetAdjustments(weekId: string | null) {
 
     // Only write correction record if there is a property to reference
     if (entry?.property_id) {
-      await supabase.from('payroll_timesheet_corrections').insert({
+      const { error: corrRemoveErr } = await supabase.from('payroll_timesheet_corrections').insert({
         time_entry_id: entryId,
         from_property_id: entry.property_id,
         to_property_id: entry.property_id,
@@ -313,6 +317,7 @@ export function useTimesheetAdjustments(weekId: string | null) {
         corrected_by: userId,
         corrected_at: new Date().toISOString(),
       })
+      if (corrRemoveErr) console.error('payroll_timesheet_corrections insert (remove)', corrRemoveErr)
     }
 
     await refetch()

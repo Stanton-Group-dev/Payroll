@@ -198,17 +198,19 @@ export default function PortfoliosPage() {
         .in('id', wizard.selectedPropertyIds)
       if (propErr) { setWizardError(propErr.message); setSaving(false); return }
       // Mirror the portfolio assignment onto the curated overlay so grouping stays in sync.
-      await supabase.from('payroll_property').update({ portfolio_id: portfolioId }).in('property_id', wizard.selectedPropertyIds)
+      const { error: overlayErr } = await supabase.from('payroll_property').update({ portfolio_id: portfolioId }).in('property_id', wizard.selectedPropertyIds)
+      if (overlayErr) { setWizardError(overlayErr.message); setSaving(false); return }
     }
 
     // Set portfolio-specific management fee if it differs from default
     const feeRate = parseFloat(wizard.feeRate)
     if (!isNaN(feeRate)) {
-      await supabase.from('payroll_management_fee_config').insert({
+      const { error: feeErr } = await supabase.from('payroll_management_fee_config').insert({
         rate_pct: feeRate / 100,
         portfolio_id: portfolioId,
         effective_date: wizard.feeEffectiveDate,
       })
+      if (feeErr) { setWizardError(feeErr.message); setSaving(false); return }
     }
 
     setShowWizard(false)
@@ -298,7 +300,8 @@ export default function PortfoliosPage() {
 
     // Create the curated overlay row for the new property (insert-missing; seeds owner_llc
     // from the billing LLC just entered). This is what invoicing actually reads.
-    await supabase.rpc('payroll_property_reconcile')
+    const { error: reconcileErr } = await supabase.rpc('payroll_property_reconcile')
+    if (reconcileErr) console.error('payroll_property_reconcile failed', reconcileErr)
 
     setPropertyDrawerOpen(false)
     setPropertyForm(emptyPropertyForm())

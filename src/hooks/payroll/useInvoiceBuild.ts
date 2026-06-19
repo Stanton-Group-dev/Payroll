@@ -11,7 +11,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { usePayrollWeekReview } from './usePayrollWeekReview'
-import { calculatePayroll, type EmployeePaySummary } from '@/lib/payroll/calculations'
+import { calculatePayroll, SPREAD_OTHER_DEPT, type EmployeePaySummary } from '@/lib/payroll/calculations'
 import type { WorkyardRow } from '@/lib/payroll/csv-parser'
 
 /** Map a (Spanish / old / pickup) cost-code name to a clean English activity for the customer. */
@@ -93,11 +93,15 @@ export function useInvoiceBuild(weekId: string) {
       .finally(() => setWyLoading(false))
   }, [weekStart])
 
+  // Salaried dept splits (override → default), resolved once in the shared review hook.
+  const salariedDeptSplits = review.salariedDeptSplits
+
   const { invoices, employeeSummaries } = useMemo(() => {
     if (review.loading) return { invoices: [] as BuiltInvoice[], employeeSummaries: [] as EmployeePaySummary[] }
     const calc = calculatePayroll(
       review.employees, review.entries, review.adjustments,
       review.feeConfigs, review.properties, review.mileageReimbursements,
+      salariedDeptSplits,
     )
 
     // Cost-code hours per property CODE (Workyard projectName carries the S-code).
@@ -120,7 +124,26 @@ export function useInvoiceBuild(weekId: string) {
           : pc.labor_cost > 0
             ? [{ act: 'General Labor', hours: 0, labor: pc.labor_cost }]
             : []
-        if (pc.spread_cost > 0) breakdown.push({ act: 'Administrative & Supervisory Allocation', hours: 0, labor: pc.spread_cost })
+        if (pc.spread_cost > 0) {
+          // Break the Administrative (spread) line into per-department sub-lines when
+          // the salaried pay was actually split across departments. If everything
+          // landed in 'Other' (no splits configured), keep the original single line.
+          const depts = pc.spread_by_dept.filter(d => Math.abs(d.amount) > 0.005)
+          const hasRealSplit = depts.some(d => d.department !== SPREAD_OTHER_DEPT)
+          if (hasRealSplit) {
+            for (const d of depts) {
+              breakdown.push({
+                act: d.department === SPREAD_OTHER_DEPT
+                  ? 'Administrative — Other'
+                  : `Administrative — ${d.department}`,
+                hours: 0,
+                labor: d.amount,
+              })
+            }
+          } else {
+            breakdown.push({ act: 'Administrative & Supervisory Allocation', hours: 0, labor: pc.spread_cost })
+          }
+        }
         if (pc.mileage_cost > 0) breakdown.push({ act: 'Mileage', hours: 0, labor: pc.mileage_cost })
         const prop = review.properties.find(p => p.id === pc.property_id)
         const llc = prop?.billing_llc
@@ -142,7 +165,8 @@ export function useInvoiceBuild(weekId: string) {
 
     return { invoices, employeeSummaries: calc.employee_summaries }
   }, [review.loading, review.employees, review.entries, review.adjustments, review.feeConfigs,
-      review.properties, review.mileageReimbursements, review.excludedPropertyIds, rows, ownerByPortfolio, fullAddrById])
+      review.properties, review.mileageReimbursements, review.excludedPropertyIds, rows, ownerByPortfolio, fullAddrById,
+      salariedDeptSplits])
 
   // Remote employees run on a separate payroll (pay_group = 'remote') and are
   // excluded from the on-site hourly summary on the statement.

@@ -73,7 +73,8 @@ export async function POST(req: NextRequest) {
     if (insErr) return NextResponse.json({ error: insErr.message }, { status: 500 })
   }
 
-  await admin.from('remote_portal_tokens').update({ last_used_at: new Date().toISOString() }).eq('token', token)
+  const { error: tokenErr } = await admin.from('remote_portal_tokens').update({ last_used_at: new Date().toISOString() }).eq('token', token)
+  if (tokenErr) console.error('remote_portal_tokens last_used_at update failed', tokenErr)
 
   const total = rows.reduce((s, r) => s + r.regular_hours, 0)
   return NextResponse.json({ ok: true, submittedDays: rows.length, totalHours: total })

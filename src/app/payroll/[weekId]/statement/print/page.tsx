@@ -4,6 +4,9 @@
  * Printable weekly statement — the final output, in order:
  *   Page 1: Statement — each billing LLC and its amount, with total payroll.
  *   Page 2: Hourly summary — on-site employees' hours & wages (remote run excluded).
+ *   Page 3: Reimbursements & adjustments — per-employee phone, mileage, other
+ *           adjustments, and advances/deductions (the non-wage payments this PDF
+ *           authorizes). All employees with activity, remote included.
  *   Then one page PER billing LLC: that LLC's itemized invoice. Each LLC starts on
  *   a fresh page; a large LLC may run 2–3 pages.
  * Works on a draft week (math from useInvoiceBuild — no approval/generation needed).
@@ -49,6 +52,28 @@ export default function StatementPrintPage({ params }: { params: Promise<{ weekI
       rw: t.rw + e.regular_wages, ow: t.ow + e.ot_wages, gross: t.gross + e.gross_pay,
     }),
     { reg: 0, ot: 0, pto: 0, rw: 0, ow: 0, gross: 0 },
+  )
+
+  // Reimbursements & adjustments — the non-wage payments (and deductions) this PDF
+  // authorizes accounting to pay out. Unlike the hourly summary, this includes EVERY
+  // employee with any phone / mileage / other-adjustment / advance activity — remote
+  // staff too, since reimbursements are real payouts regardless of which run their
+  // wages land on. reimb_total = phone + mileage + other − advances (the net the
+  // employee receives on top of, or against, their wages).
+  const reimb = employeeSummaries
+    .map(e => ({
+      ...e,
+      is_remote: remoteEmployeeIds.has(e.employee_id),
+      reimb_total: e.phone_reimbursement + e.mileage_reimbursement + e.other_adjustments - e.advances,
+    }))
+    .filter(e => e.phone_reimbursement || e.mileage_reimbursement || e.other_adjustments || e.advances)
+    .sort((a, b) => a.employee_name.localeCompare(b.employee_name))
+  const rtot = reimb.reduce(
+    (t, e) => ({
+      phone: t.phone + e.phone_reimbursement, mileage: t.mileage + e.mileage_reimbursement,
+      other: t.other + e.other_adjustments, adv: t.adv + e.advances, total: t.total + e.reimb_total,
+    }),
+    { phone: 0, mileage: 0, other: 0, adv: 0, total: 0 },
   )
 
   return (
@@ -158,6 +183,63 @@ export default function StatementPrintPage({ params }: { params: Promise<{ weekI
           </tfoot>
         </table>
       </section>
+
+      {/* ── PAGE 3 — Reimbursements & adjustments (per employee, remote included) ── */}
+      {reimb.length > 0 && (
+        <section className="max-w-4xl mx-auto px-8 py-10 break-before-page">
+          <div className="flex items-end justify-between mb-3">
+            <div>
+              <h2 className="font-serif text-2xl text-[var(--ink)]">Reimbursements &amp; Adjustments</h2>
+              <p className="text-sm text-[var(--muted)] mt-1">Per employee — non-wage payments authorized this week</p>
+            </div>
+            <p className="text-sm text-[var(--muted)]">Week {week?.week_start} – {week?.week_end}</p>
+          </div>
+
+          <p className="text-xs text-[var(--muted)] italic mb-4">
+            Phone and mileage are tax-free reimbursements; Other Adj. covers tools, expense receipts, and bonuses;
+            Advances / Deductions reduce the payout (shown in parentheses). All employees with activity are listed,
+            including remote-run staff (tagged).
+          </p>
+
+          <table className="w-full text-sm border border-[var(--border)]">
+            <thead>
+              <tr className="bg-[var(--primary)] text-white text-xs">
+                <th className="px-3 py-2 text-left font-medium">Employee</th>
+                <th className="px-3 py-2 text-right font-medium">Phone</th>
+                <th className="px-3 py-2 text-right font-medium">Mileage</th>
+                <th className="px-3 py-2 text-right font-medium">Other Adj.</th>
+                <th className="px-3 py-2 text-right font-medium">Advances / Deductions</th>
+                <th className="px-3 py-2 text-right font-medium">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {reimb.map((e, i) => (
+                <tr key={e.employee_id} className={`border-t border-[var(--divider)] ${i % 2 ? 'bg-[var(--bg-section)]/40' : ''}`}>
+                  <td className="px-3 py-1.5 text-[var(--ink)]">
+                    {e.employee_name}
+                    {e.is_remote && <span className="ml-2 text-xs text-[var(--muted)]">(remote)</span>}
+                  </td>
+                  <td className="px-3 py-1.5 text-right">{e.phone_reimbursement ? formatCurrency(e.phone_reimbursement) : '—'}</td>
+                  <td className="px-3 py-1.5 text-right">{e.mileage_reimbursement ? formatCurrency(e.mileage_reimbursement) : '—'}</td>
+                  <td className="px-3 py-1.5 text-right">{e.other_adjustments ? formatCurrency(e.other_adjustments) : '—'}</td>
+                  <td className="px-3 py-1.5 text-right">{e.advances ? `(${formatCurrency(e.advances)})` : '—'}</td>
+                  <td className="px-3 py-1.5 text-right font-medium">{formatCurrency(e.reimb_total)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="border-t-2 border-[var(--primary)] bg-[var(--primary)]/5 font-semibold">
+                <td className="px-3 py-2 text-[var(--ink)]">Total — {reimb.length} employees</td>
+                <td className="px-3 py-2 text-right">{formatCurrency(rtot.phone)}</td>
+                <td className="px-3 py-2 text-right">{formatCurrency(rtot.mileage)}</td>
+                <td className="px-3 py-2 text-right">{formatCurrency(rtot.other)}</td>
+                <td className="px-3 py-2 text-right">{rtot.adv ? `(${formatCurrency(rtot.adv)})` : '—'}</td>
+                <td className="px-3 py-2 text-right">{formatCurrency(rtot.total)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </section>
+      )}
 
       {/* ── One page per LLC — itemized invoice (each starts on a fresh page) ── */}
       {llcRows.map(inv => (

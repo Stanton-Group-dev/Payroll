@@ -292,6 +292,17 @@ export async function fetchWorkyardTimecards(
 
   const rows: WorkyardRow[] = []
 
+  // A building can ride in the COST CODE rather than the project. On vendor/supply runs
+  // (Home Depot, "Office Park Hardware Cluster", …) the Workyard project is the vendor and
+  // the employee taps a per-building "Material Pickup" cost code whose `code` IS the S-code
+  // (e.g. "S0020"). Recover that S-code so the hours bill to the building instead of landing
+  // unallocated. Generic over any S-code → new acquisitions need no code change, just a
+  // property row + a per-building cost code in Workyard. See DECISIONS_LOG.md §0.2.
+  const sCodeFromCost = (jc: WYJobCode | undefined): string | null => {
+    const m = (jc?.code ?? '').match(/^\s*(S\d+)/i) ?? (jc?.name ?? '').match(/\b(S\d+)\b/i)
+    return m ? m[1].toUpperCase() : null
+  }
+
   for (const card of cards) {
     const workyardId = String(card.worker?.employee_id ?? card.employee_id)
     const employeeName = card.worker?.display_name ?? `Employee ${card.employee_id}`
@@ -303,7 +314,12 @@ export async function fetchWorkyardTimecards(
     const totalOtSecs = summary?.over_time_secs ?? 0
     const totalDtSecs = summary?.double_time_secs ?? 0
 
-    const allocations = card.cost_allocations?.filter(a => a.org_project_id !== null) ?? []
+    // Keep allocations that have a project OR a building-bearing cost code (S-code in the
+    // job code) — the latter is how supply-run buildings are tagged. Only allocations with
+    // neither fall through to the unallocated row below.
+    const allocations = card.cost_allocations?.filter(
+      a => a.org_project_id !== null || sCodeFromCost(a.job_code) !== null,
+    ) ?? []
 
     if (allocations.length === 0) {
       rows.push({
@@ -317,6 +333,7 @@ export async function fetchWorkyardTimecards(
         ptoHours: 0,
         timecardId,
         costCode: '',
+        costCodeName: '',
       })
       continue
     }
@@ -330,14 +347,22 @@ export async function fetchWorkyardTimecards(
       rows.push({
         workyardId,
         employeeName,
-        projectName: proj?.sCode ?? alloc.geofence?.name ?? '',
+        // Prefer a real S-code from the project; if the project is a vendor (sCode falls back
+        // to its full name), recover the building from the cost code; only then the raw name.
+        projectName:
+          (proj?.sCode && /^S\d+/i.test(proj.sCode) ? proj.sCode : null) ??
+          sCodeFromCost(alloc.job_code) ??
+          proj?.sCode ?? alloc.geofence?.name ?? '',
         customerName: proj?.customerName ?? '',
         entryDate,
         regularHours: Math.round((totalRegSecs * proportion / 3600) * 100) / 100,
         otHours: Math.round(((totalOtSecs + totalDtSecs) * proportion / 3600) * 100) / 100,
         ptoHours: 0,
         timecardId,
+        // costCode keeps the NAME here (unchanged activity behavior); the CSV path supplies
+        // the real code. costCodeName captures the human label for both.
         costCode: alloc.job_code?.name ?? '',
+        costCodeName: alloc.job_code?.name ?? '',
       })
     }
   }

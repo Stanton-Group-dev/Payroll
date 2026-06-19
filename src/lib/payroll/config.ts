@@ -31,6 +31,17 @@ export const OVERHEAD_PROPERTY_NAMES = [
   'stanton management llc',
 ]
 
+/**
+ * Workyard project names whose labor has no single billable property and is instead
+ * paid like normal but allocated like salaried pay — spread across all billable
+ * properties by unit count, with the management fee applying. Matched case-insensitively
+ * as a whole-name equality (not a substring) so e.g. "Office" matches but an unrelated
+ * project that merely contains the word does not. Add future overhead projects here.
+ */
+export const SPREAD_OVERHEAD_PROJECT_NAMES = [
+  'office',
+]
+
 /** IANA timezone for the Workyard org. Used for date boundary calculations. */
 export const WORKYARD_ORG_TIMEZONE = 'America/New_York'
 

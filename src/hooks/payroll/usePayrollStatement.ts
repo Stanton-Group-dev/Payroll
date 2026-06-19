@@ -43,15 +43,18 @@ export function usePayrollStatement(weekId: string) {
     setApproving(true)
     const supabase = createClient()
     const userId = (await supabase.auth.getUser()).data.user?.id
-    await supabase.from('payroll_approvals').insert({
+    const { error: approvalErr } = await supabase.from('payroll_approvals').insert({
       payroll_week_id: weekId,
       stage: 'statement',
       approved_by: userId,
       approved_at: new Date().toISOString(),
     })
-    await supabase.from('payroll_weeks').update({ status: 'statement_sent' }).eq('id', weekId)
+    if (approvalErr) { setError(approvalErr.message); setApproving(false); return }
+    const { error: weekErr } = await supabase.from('payroll_weeks').update({ status: 'statement_sent' }).eq('id', weekId)
+    if (weekErr) { setError(weekErr.message); setApproving(false); return }
     for (const id of invoiceIds) {
-      await supabase.from('payroll_invoices').update({ status: 'sent' }).eq('id', id)
+      const { error: invoiceErr } = await supabase.from('payroll_invoices').update({ status: 'sent' }).eq('id', id)
+      if (invoiceErr) { setError(invoiceErr.message); setApproving(false); return }
     }
     setApproved(true)
     setApproving(false)

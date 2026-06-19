@@ -46,8 +46,29 @@ export function usePayrollAdjustments(weekId: string | null) {
   const seedPhoneReimbursements = useCallback(async (employeeIds: string[]) => {
     if (!weekId) return
     const supabase = createClient()
+    // Phone reimbursement is only for people who actually worked this week: anyone with
+    // zero hours doesn't get it. Salaried employees (paid by weekly_rate, may log no
+    // time entries) stay eligible regardless of logged hours.
+    const [{ data: entryRows }, { data: empRows }] = await Promise.all([
+      supabase
+        .from('payroll_time_entries')
+        .select('employee_id, regular_hours, ot_hours, pto_hours')
+        .eq('payroll_week_id', weekId)
+        .eq('is_active', true),
+      supabase.from('payroll_employees').select('id, type').in('id', employeeIds),
+    ])
+    const hoursByEmp = new Map<string, number>()
+    for (const r of entryRows ?? []) {
+      hoursByEmp.set(
+        r.employee_id,
+        (hoursByEmp.get(r.employee_id) ?? 0) + (r.regular_hours ?? 0) + (r.ot_hours ?? 0) + (r.pto_hours ?? 0),
+      )
+    }
+    const salaried = new Set((empRows ?? []).filter(e => e.type === 'salaried').map(e => e.id))
+    const eligible = employeeIds.filter(id => (hoursByEmp.get(id) ?? 0) > 0 || salaried.has(id))
+
     const existing = adjustments.filter(a => a.type === 'phone').map(a => a.employee_id)
-    const toAdd = employeeIds.filter(id => !existing.includes(id))
+    const toAdd = eligible.filter(id => !existing.includes(id))
     if (toAdd.length === 0) return
     const userId = (await supabase.auth.getUser()).data.user?.id ?? null
     const rows = toAdd.map(employee_id => ({
