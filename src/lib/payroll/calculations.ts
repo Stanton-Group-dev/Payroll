@@ -98,10 +98,13 @@ export interface PayrollCalculationResult {
 
 export function getMgmtFeeRate(
   portfolioId: string | null,
-  configs: PayrollManagementFeeConfig[]
+  configs: PayrollManagementFeeConfig[],
+  /** ISO date string to use as the effective-date ceiling. Defaults to today when omitted. */
+  asOf?: string
 ): number {
+  const ceiling = new Date(asOf ?? new Date().toISOString().slice(0, 10))
   const effectiveConfigs = configs.filter(
-    c => new Date(c.effective_date) <= new Date()
+    c => new Date(c.effective_date) <= ceiling
   )
   effectiveConfigs.sort((a, b) =>
     new Date(b.effective_date).getTime() - new Date(a.effective_date).getTime()
@@ -141,7 +144,15 @@ export function calculatePayroll(
    *  week override if set, else default splits. Each list's pct values are weights
    *  (normalized internally, so 0–1 fractions or 0–100 both work). Drives the
    *  per-department breakdown of spread_cost; omit for no breakdown. */
-  salariedDeptSplits: Record<string, { department: string; pct: number }[]> = {}
+  salariedDeptSplits: Record<string, { department: string; pct: number }[]> = {},
+  /** ISO week-start date used for getMgmtFeeRate effective-date filtering (C-5).
+   *  When omitted, getMgmtFeeRate defaults to today — behaviour unchanged for
+   *  existing callers that don't pass weekStart. */
+  weekStart?: string,
+  /** When true (default), total_mgmt_fee is included in required_prefund (OD-5:
+   *  management fee collected at prefund time). Pass false to compute prefund as
+   *  gross + tax + WC only. */
+  prefundIncludesMgmtFee: boolean = true
 ): PayrollCalculationResult {
   const employeeMap = Object.fromEntries(employees.map(e => [e.id, e]))
   const propertyMap = Object.fromEntries(properties.map(p => [p.id, p]))
@@ -269,10 +280,15 @@ export function calculatePayroll(
     // on them (phone, mileage, tool, expense_reimbursement). They're still paid to the
     // employee (in gross, and thus in the pre-fund total); they're just removed from the
     // tax/WC base. Bonuses remain taxable wages.
-    const taxable_base = gross_pay - d.phone_reimbursement - d.mileage_reimbursement - d.nontax_reimbursement
+    // OD-3: gross_pay already subtracts advances, so add them back to restore the
+    // pre-advance wage base. Tax and WC are charged on wages earned, not wages
+    // received net-of-advance — advances are a payment-timing mechanism, not a
+    // wage reduction.
+    const taxable_base = gross_pay - d.phone_reimbursement - d.mileage_reimbursement - d.nontax_reimbursement + d.advances
     const payroll_tax = emp.pay_tax ? taxable_base * PAYROLL_TAX_RATE : 0
     const workers_comp = emp.wc ? taxable_base * WORKERS_COMP_RATE : 0
-    const feeRate = getMgmtFeeRate(null, mgmtFeeConfigs)
+    // C-5: pass the week's start date so the fee rate is point-in-time, not today.
+    const feeRate = getMgmtFeeRate(null, mgmtFeeConfigs, weekStart)
     // Mileage is a direct pass-through cost billed to the property at cost — the
     // management fee (general overhead) does NOT apply to it, so it's excluded from
     // the fee base. (Phone/tools remain in the base; they're general spread, not direct.)
@@ -443,7 +459,8 @@ export function calculatePayroll(
     const labor = propLaborCost[prop.id] ?? 0
     const spread = propSpreadCost[prop.id] ?? 0
     const mileage = propMileageCost[prop.id] ?? 0
-    const feeRate = getMgmtFeeRate(prop.portfolio_id, mgmtFeeConfigs)
+    // C-5: use the week's start date so the fee rate is point-in-time.
+    const feeRate = getMgmtFeeRate(prop.portfolio_id, mgmtFeeConfigs, weekStart)
     // Mileage is pass-through: billed to the property at cost, NOT in the fee base.
     const mgmt_fee = (labor + spread) * feeRate
     const total_cost = labor + spread + mileage + mgmt_fee
@@ -466,8 +483,16 @@ export function calculatePayroll(
   const total_gross_pay = employee_summaries.reduce((s, e) => s + e.gross_pay, 0)
   const total_payroll_tax = employee_summaries.reduce((s, e) => s + e.payroll_tax, 0)
   const total_workers_comp = employee_summaries.reduce((s, e) => s + e.workers_comp, 0)
-  const total_mgmt_fee = employee_summaries.reduce((s, e) => s + e.management_fee, 0)
-  const required_prefund = round2(total_gross_pay + total_payroll_tax + total_workers_comp)
+  // OD-4: property_costs is the authoritative fee total (properties own the fee rate;
+  // per-employee management_fee is display-only and should not drive the cash total).
+  const total_mgmt_fee = property_costs.reduce((s, p) => s + p.mgmt_fee, 0)
+  // OD-5: include the management fee in the prefund by default so the collected amount
+  // covers all obligations. Callers can opt out with prefundIncludesMgmtFee=false to
+  // get the gross+tax+WC-only figure.
+  const required_prefund = round2(
+    total_gross_pay + total_payroll_tax + total_workers_comp +
+    (prefundIncludesMgmtFee ? total_mgmt_fee : 0)
+  )
 
   return {
     employee_summaries,
