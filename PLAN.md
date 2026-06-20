@@ -1,280 +1,154 @@
 # Payroll & Invoicing System
 Replaces Stanton Management's spreadsheet-driven weekly payroll and property billing with an auditable, approval-gated system that preserves history, surfaces management fees as explicit line items, and scales across portfolios without manual rebuilds.
 
-## Features
-
-### Workyard Time Card Ingestion
-- **Status:** partial
-- **Description:** Pulls approved time cards from the Workyard API with CSV fallback, performs S-code matching, and routes flagged entries to the correction queue.
-- **Blockers:** Reliability depends on fallback/manual correction workflows; full API-first ingestion not yet stable.
-- **Dependencies:** none
-- **Unlocks:** Timesheet Adjustment Workbench, Cost Allocation Engine, end-to-end payroll run
-- **Effort:** medium
-- **Priority:** P1
-
-### Timesheet Adjustment Workbench
-- **Status:** partial
-- **Description:** Week-grid-first interface for reassign/add/spread/remove operations with pending state handling, carry-forward for locked prior weeks, and a throughput target of <30 seconds per unallocated block.
-- **Blockers:** none
-- **Dependencies:** none
-- **Unlocks:** Cost Allocation Engine, Approval Gates
-- **Effort:** large
-- **Priority:** P1
-
-### Employee / Rate / Department Split Management
-- **Status:** partial
-- **Description:** Master employee records with effective-dated rates, compensation flags, and salaried department split defaults with audited overrides.
-- **Blockers:** none
-- **Dependencies:** none
-- **Unlocks:** Cost Allocation Engine, ADP Export
-- **Effort:** medium
-- **Priority:** P2
-
-### Cost Allocation Engine
-- **Status:** planned
-- **Description:** Direct labor, unit-weighted portfolio spread, and explicit management fee calculation per billing entity — replicates and replaces the 1,359-row Excel Summary sheet.
-- **Blockers:** none
-- **Dependencies:** none
-- **Unlocks:** Invoice Generator, Statement Generator, Pre-Fund Cash Estimate
-- **Effort:** large
-- **Priority:** P1
-
-### Approval Gates + Immutable Weekly Locking
-- **Status:** planned
-- **Description:** Enforced sequential approval chain (timesheet → payroll → invoices → statement → ADP export) with audit trail and post-approval lock preventing silent edits.
-- **Blockers:** none
-- **Dependencies:** none
-- **Unlocks:** History Store, full end-to-end payroll run
-- **Effort:** large
-- **Priority:** P1
-
-### Invoice Generator
-- **Status:** planned
-- **Description:** Per-LLC invoice generation with explicit management fee line items — Park Portfolio sub-LLCs get individual invoices.
-- **Blockers:** none
-- **Dependencies:** none
-- **Unlocks:** Statement Generator
-- **Effort:** medium
-- **Priority:** P1
-
-### Statement Generator
-- **Status:** planned
-- **Description:** Consolidated weekly statement rolling up all LLC invoices with error-check logic and release gates.
-- **Blockers:** none
-- **Dependencies:** none
-- **Unlocks:** ADP Export, bank transfer readiness
-- **Effort:** medium
-- **Priority:** P2
-
-### ADP Export + Inbound Reconciliation
-- **Status:** planned
-- **Description:** Outbound gross pay summary for Kathleen to submit to ADP, plus inbound ADP report upload with automatic variance detection and tracking.
-- **Blockers:** none
-- **Dependencies:** none
-- **Unlocks:** Full payroll loop closure, variance auditing
-- **Effort:** medium
-- **Priority:** P2
-
-### Expense & Reimbursement Submission
-- **Status:** planned
-- **Description:** Receipt-required, mobile-first expense submission with two paths (employee self-submit and in-office proxy), payment method routing, batch submission with signature attestation, and gas auto-allocation by property visit pattern.
-- **Blockers:** none
-- **Dependencies:** none
-- **Unlocks:** Complete reimbursement tracking, Kathleen bookkeeping queue
-- **Effort:** large
-- **Priority:** P2
-
-### Management Fee Configuration
-- **Status:** planned
-- **Description:** Per-portfolio configurable management fee rates with effective dating, visible in admin UI.
-- **Blockers:** Rate values for existing portfolios need management input at setup time.
-- **Dependencies:** none
-- **Unlocks:** Invoice Generator explicit fee line items
-- **Effort:** small
-- **Priority:** P1
-
-### History Store + Excel Export
-- **Status:** planned
-- **Description:** Immutable approved-week records that are queryable and exportable as Excel for downstream workflows.
-- **Blockers:** none
-- **Dependencies:** none
-- **Unlocks:** Cost-Per-Unit Intelligence Layer, historical payroll queries
-- **Effort:** medium
-- **Priority:** P1
-
-### Cost-Per-Unit Intelligence Layer
-- **Status:** planned
-- **Description:** Per-property and portfolio cost trend dashboard with rolling averages, comparisons, sparklines, and budget-threshold alerts.
-- **Blockers:** Insufficient approved historical week volume; budget threshold amounts pending management input.
-- **Dependencies:** none
-- **Unlocks:** Proactive cost management, portfolio performance visibility
-- **Effort:** large
-- **Priority:** P3
-
-### Workyard Reliability Tracking
-- **Status:** planned
-- **Description:** Surfaces employee-level dependency on manual entry vs Workyard to focus operational coaching.
-- **Blockers:** none
-- **Dependencies:** none
-- **Unlocks:** Operational coaching insights, import quality improvement
-- **Effort:** small
-- **Priority:** P3
-
-### Portfolio Expansion Onboarding
-- **Status:** planned
-- **Description:** Admin-driven flows for adding new portfolios, external projects, and divergent invoice structures without dev work.
-- **Blockers:** none
-- **Dependencies:** none
-- **Unlocks:** Business scalability without engineering bottleneck
-- **Effort:** medium
-- **Priority:** P3
-
-### Mileage + SMS Confirmation Paths
-- **Status:** planned
-- **Description:** Schema-ready placeholders for future mileage reimbursement (via Workyard mileage data) and SMS employee hour confirmation.
-- **Blockers:** none
-- **Dependencies:** none
-- **Unlocks:** Future automation without schema rework
-- **Effort:** small
-- **Priority:** P3
-
-## Recent Changes
-- Prioritize publishable Supabase keys over legacy revoked keys
-- Recover login when legacy Supabase API key is revoked
-- Harden Supabase auth env handling and upgrade ESLint
-- Consolidate planning into PLAN.md as single operational source of truth
-- Harden Supabase client auth init for missing Vercel env vars
-- Harden payroll middleware against env/auth edge failures
-- Fix payroll prerender by wrapping useSearchParams pages in Suspense
-- Add admin property creation flow with owner and unit fields
-- Fix Workyard timecards API filter format; enable Turbopack
-- Implement workflow audit fixes: navigation, ADP export, dept splits, locks, history, per-week context links
-
-## Known Debt
-- RLS policies are permissive `USING (true)` for authenticated users — must be tightened to portfolio-level filtering before multi-portfolio deployment.
-- Workyard ingestion still depends on fallback/manual correction rather than reliable API-first path.
-- No immutable locking or approval enforcement yet — data can be silently edited post-review.
-- Budget threshold alerts require management-provided values that have not been supplied.
-- Legacy docs (PAYROLL_PRD.md, TIMESHEET_ADJUSTMENT_PRD.md, etc.) still exist alongside consolidated PLAN.md — candidates for cleanup.
-
-## Next Milestone
-Complete Phase 1 — run one full weekly payroll and billing cycle end-to-end with zero Excel dependency.
-
-## Triage Flags
-- **RLS posture:** Current permissive policies are a known gap; must be resolved before any multi-portfolio rollout.
-- **Cost allocation engine:** Not yet built — this is the most complex module and blocks invoice/statement generation.
-- **Approval gates:** No enforcement exists yet; managers can edit data at any stage without audit trail.
+> **Status reconciled 2026-06-20** against the actual code in both worktrees (`C:/01-repos/Payroll` = main line, `C:/01-repos/Payroll-hardening` = unmerged hardening branch). Statuses below are evidence-verified, not aspirational.
 
 ---
 
-## Source Consolidation
-This file consolidates planning content formerly maintained in:
-- PAYROLL_PRD.md
-- TIMESHEET_ADJUSTMENT_PRD.md
-- TIMESHEET_ADJUSTMENT_UI_SPEC.md
-- EXPENSE_REIMBURSEMENT_PRD.md
-- DATABASE_ARCHITECTURE.md
-- ADVANCED_DATA_TABLE_SPECIFICATION.md
+## Build status — planned vs built (the headline)
 
-## Core Operating Modules (Consolidated)
-1. Workyard ingestion (approved cards only) plus CSV fallback, including S-code matching and flagged-entry routing.
-2. Timesheet adjustment workflow for reassign/add/spread/remove, pending state handling, and carry-forward for locked prior weeks.
-3. Employee/rate management with effective-dated records, compensation flags, and salaried department split defaults/overrides.
-4. Adjustment manager for phone/tool/advance/deduction flows and payroll-impact logic.
-5. Cost allocation engine for direct labor, unit-weighted spread, management fee calculation, and pre-fund estimate.
-6. Invoice generation by legal billing entity with explicit fee line items.
-7. Statement generation with release checks.
-8. ADP outbound export and inbound reconciliation.
-9. History store for immutable approved weeks and exports.
-10. Intelligence layer (cost-per-unit trends, portfolio comparisons, alerts) after history accrues.
+**All 15 originally-planned features are built.** Nothing in the plan is unstarted. On top of them, ~23 additional capabilities shipped that were never in this plan (see "Shipped beyond the plan"). The system **exceeds** the original Phase-1 scope and has reached well into Phase 2.
 
-## Timesheet Adjustment UX Direction (Consolidated)
-- Week-grid-first interface (rows: properties, columns: days + total) instead of modal-first workflow.
-- Unallocated row is always prominent; unresolved/pending counts visible in header.
-- Inline action drawer per selected cell with Quick Assign, Split, Spread to Portfolio, Mark Pending, and Edit/Remove as context allows.
-- Separate Manual Add panel and Carry-Forward panel.
-- Collapsible adjustment log with operation/user/timestamp/reason traceability.
-- Throughput target: resolve common unallocated block in <30 seconds.
+| Planned feature | Real status |
+|---|---|
+| Workyard Time Card Ingestion | ✅ done |
+| Timesheet Adjustment Workbench | ✅ done |
+| Employee / Rate / Dept-Split Management | ✅ done · debt |
+| Cost Allocation Engine | ✅ built — **best version unmerged** (see G1) |
+| Approval Gates + Immutable Weekly Locking | 🟠 partial — locking built (unmerged); sequential-stage enforcement not built |
+| Invoice Generator | ✅ done · debt |
+| Statement Generator | ✅ done |
+| ADP Export + Inbound Reconciliation | ✅ done · debt |
+| Expense & Reimbursement Submission | ✅ built (core) · debt |
+| Management Fee Configuration | ✅ done · debt |
+| History Store + Excel Export | ✅ done |
+| Cost-Per-Unit Intelligence Layer | ✅ done (already built, was marked Phase-2-parked) |
+| Workyard Reliability Tracking | ✅ done |
+| Portfolio Expansion Onboarding | 🟠 partial — wizard built; LLC-groupings step not persisted |
+| Mileage + SMS Confirmation Paths | 🟠 partial — manager mileage review built; Workyard-miles *import* not built; SMS engine built, no cron |
 
-## Expense & Reimbursement Flow (Consolidated)
-- Two submission paths: employee self-submit (mobile) and in-office proxy submission.
-- Non-negotiable receipt enforcement (no receipt, no submission).
-- Payment method routing distinguishes reimbursement vs bookkeeping-only handling.
-- Batch submission with single signature attestation.
-- Configurable weekly cutoff messaging before final signature.
-- Approver routing by property/portfolio and bookkeeping visibility for Kathleen.
-- Gas reimbursement includes allocation logic by recent property visit pattern, with approver override + required note.
-- Mileage remains future scope but schema placeholder retained.
+**"· debt" = the feature works, but a cross-cutting plumbing gap applies** (almost always G1 or G2 below). It is built, not missing.
 
-## Data and Architecture Rules (Consolidated)
-- Department tables must be prefixed (`payroll_` for this app).
-- Canonical shared tables are read via snake_case canonical layer, not AF_ staging tables.
-- No hard deletes; use deactivation/status patterns.
-- Money columns use NUMERIC(10,2); status fields use constrained lowercase values.
-- RLS required on all payroll-owned tables.
-- Department-specific requirements should use department-owned tables with canonical FKs, avoiding direct mutation of AF-authoritative canonical data.
+### The four cross-cutting gaps (these explain almost every non-"done")
+- **G1 — the hardening branch is not merged.** The *correct* cost-allocation engine (PRP-02: OT/tax-base/fee-authority/prefund fixes, largest-remainder rounding, config-driven rates), the DB week-lock trigger (PRP-04), and the rate-settings migration live **only** on `hardening/payroll-waves-0-2`. Worse, the branches **diverged**: `main` has the OD-2 cost-code→building fix; hardening has the math fix; *neither has both*. **A careful merge is the #1 task.**
+- **G2 — schema not in source-controlled migrations.** Many live tables (employee rates/splits, mgmt-fee config, ADP recon, expenses, weekly-property-costs, thresholds) were created directly on the DB before the migration window and have **no `CREATE TABLE` migration in the repo**. Features work; the schema isn't reproducible from source. Real onboarding/DR debt.
+- **G3 — RLS write-policy holes.** A few tables (e.g. `payroll_invoices`, `payroll_invoice_line_items`) had their blanket policies dropped without role-gated replacements. Security gap to close.
+- **G4 — a handful of genuine feature gaps:** sequential approval-stage enforcement (deferred), portfolio-wizard LLC-groupings persistence, Workyard-miles import, unallocated-SMS cron + revised copy.
 
-## Data Model Snapshot (Consolidated)
-Payroll-owned domains include employees/rates/splits, weeks, time entries, corrections, adjustments, fee config, invoices + line items, weekly property costs, reconciliation, approvals, spread events, travel premiums, and expense submissions/items/approval audit records.
+---
 
-Key extension points retained:
-- `source` semantics for `workyard`, correction/manual variants, and future `sms_employee` / `mileage_workyard`.
-- Pending-resolution fields on time entries.
-- Carry-forward references on adjustments/expense items.
+## Features (verified)
 
-## Implementation Phases
+### Workyard Time Card Ingestion — ✅ done
+API pull + CSV fallback + S-code matching + flagged-entry routing, all wired (`workyard-api.ts`, `csv-parser.ts`, `import/page.tsx`, `api/workyard/timecards`). OD-2 cost-code→building recovery shipped on main. **Gap (G1):** the largest-remainder rounding fix is on hardening only; branches diverged → merge needed. Priority P1.
 
-### Phase 1 — Core Weekly Operations (Excel Replacement)
-- Finalize payroll-prefixed schema with RLS and auditing conventions.
-- Ship employee/rate management.
-- Ship Workyard ingest + fallback import path.
-- Ship timesheet adjustment workbench with pending handling and approval blocking.
-- Ship adjustment manager and cost allocation engine.
-- Ship per-entity invoice generation and consolidated statement generation.
-- Ship ADP outbound export + inbound reconciliation.
-- Ship explicit approval gates and immutable lock semantics.
-- Ship management fee configuration and pre-fund estimate.
-- Ship external project/entity admin support.
-- Ship immutable history store + exports.
+### Timesheet Adjustment Workbench — ✅ done
+Week-grid-first UI, inline drawer (Quick Assign / Split / Spread / Pending / Edit-Remove), Manual-Add + Carry-Forward panels, Adjustment Log, EmployeeSwitcher; full CRUD in `useTimesheetAdjustments.ts` with correction records on every path. **Gap (G1):** server-side `assertWeekWritable` lock guard is hardening-only (main has UI-level lock only). P1.
 
-Phase 1 exit criteria: complete one full weekly payroll and billing cycle with no spreadsheet dependency.
+### Employee / Rate / Department Split Management — ✅ done · debt
+Roster + effective-dated rates + comp flags + salaried dept-split defaults/overrides + per-field audit trail, all built. **Gap (G2):** no CREATE-TABLE migrations for rates/splits tables in source. P2.
 
-### Phase 2 — Intelligence Layer
-- Cost-per-unit dashboard and portfolio comparison.
-- Historical payroll query experience.
-- Trend visualizations.
-- Budget-threshold alerts once threshold values are provided.
+### Cost Allocation Engine — ✅ built (best version unmerged)
+Direct labor + unit-weighted spread + management fee + prefund, in `calculations.ts`/`billing.ts`. **Gap (G1, top risk):** the corrected single-engine (tax base, property-authoritative fee, prefund-includes-fee, golden test, config rates) is on **hardening only**; `main` runs the older engine. Merge to make main correct. P1.
 
-### Phase 3 — Expansion and Scalability
-- Portfolio onboarding workflow through admin operations.
-- External client onboarding improvements.
-- Support divergent invoice structures when contract terms differ.
+### Approval Gates + Immutable Weekly Locking — 🟠 partial
+Per-stage approvals + post-approval read-only + DB lock trigger on 6 pay-input tables are built (trigger is **hardening-only**, G1). **Real gap (G4):** no enforced *sequential* stage ordering (`payroll_advance_status`) — stages can be set without verifying prerequisites; explicitly deferred. P1.
 
-## Deferred / Parked Items
-- Budget thresholds pending management-provided values.
-- Mileage reimbursement execution (placeholder retained, not implemented).
-- SMS employee confirmation path (source model reserved, not implemented).
-- Employee self-service field-hour entry.
-- Additional contract variants for portfolio-specific invoice structures pending business direction.
+### Invoice Generator — ✅ done · debt
+Per-LLC invoices with explicit mgmt-fee line items + per-activity breakdown (`[weekId]/invoices`, `useInvoiceBuild.ts`). **Gap (G3):** missing RLS write policies on `payroll_invoices` / `_line_items`. P1 (security).
 
-## UI Component Standard: Advanced Data Table
-Use a reusable advanced table pattern with:
-- drag reorder + resize + visibility controls
-- sorting/filter support in wrapper components
-- density controls and local preference persistence
-- sticky headers, selected row states, loading/empty states
-- keyboard and accessibility support
-- optional bulk actions and CSV export
+### Statement Generator — ✅ done
+Consolidated per-LLC statement + variance error-check with reimbursements carve-out + release gate (`[weekId]/statement`, `usePayrollStatement.ts`). No gaps found.
 
-The table standard is the default interaction primitive for manager operations that involve high-throughput review/correction work.
+### ADP Export + Inbound Reconciliation — ✅ done · debt
+Outbound gross-pay export + inbound variance reconciliation (`adp-reconciliation`, `reconcile.ts`); on hardening the recon path routes through the single engine (G1). **Gap (G2):** recon tables lack CREATE-TABLE migrations. P2.
 
-## Operational Standards
-- Keep payroll logic in domain hooks/services rather than view components.
-- Explicitly handle loading/error/empty states for operational screens.
-- Enforce auditability of all manager overrides, approvals, and correction actions.
-- Prefer additive, effective-dated configuration over hard-coded constants.
+### Expense & Reimbursement Submission — ✅ built (core) · debt
+Submission + approval (`expenses/`, `ApprovalTab`) live. **Gaps:** the two-path mobile self-submit/proxy flow per the PRD is only partly realized; expense tables lack migrations (G2). P2.
 
-## Implementation Notes
-- Existing rates and constants (management fee, payroll tax, workers comp, phone reimbursement) must remain configurable in system tables/settings, not hard-coded.
-- All approval stage transitions should persist actor + timestamp + notes as applicable.
-- Prior approved weeks remain locked; corrections after lock use carry-forward records in current week.
+### Management Fee Configuration — ✅ done · debt
+Per-portfolio effective-dated fee in `payroll_management_fee_config` + admin UI. **Gap (G2):** no CREATE-TABLE migration in source. P1.
+
+### History Store + Excel Export — ✅ done
+Approved-week history + export (`history/`). Immutability backed by the lock trigger (G1, hardening). No functional gaps.
+
+### Cost-Per-Unit Intelligence Layer — ✅ done (ahead of plan)
+Full analytics dashboard (cost-per-unit, rolling avg, WoW delta, threshold vs actual, trend chart) at `/payroll/analytics` + Admin→Thresholds. This was marked Phase-2-parked but is **built**. **Gap (G2):** weekly-costs/thresholds tables lack migrations; threshold values still need management input. P3.
+
+### Workyard Reliability Tracking — ✅ done
+`useWorkyardReliability.ts` + collapsible panel on the employees page. No gaps.
+
+### Portfolio Expansion Onboarding — 🟠 partial
+In-app stepped wizard (Admin→Portfolios) + external-projects CRUD + admin property creation built. **Real gap (G4):** the wizard's LLC-Groupings step is UI-only — it doesn't persist `owner_llc` (must be set per-property manually). P3.
+
+### Mileage + SMS Confirmation Paths — 🟠 partial
+Manager-side **mileage review** (approve/deny/edit, effective-dated rate, pay+billing allocation) is **built** (`mileage/`, migration `20260616_02`). **Real gaps (G4):** (a) Workyard-miles *import* isn't built — miles are manual-entry only; (b) the unallocated-hours **SMS engine is built** (`unallocatedHolds.ts`, `twilio-api.ts`) but has no daily cron and the copy needs revision per `UNALLOCATED_HOURS_NOTIFICATION_PRD.md`. P3 (mileage import) / P2 (SMS cron).
+
+---
+
+## Shipped beyond the original plan (~23, audit-verified)
+
+Capabilities built that were never in the feature list above:
+
+- **Unallocated-hours holds + Twilio SMS** (`unallocatedHolds.ts`, `twilio-api.ts`, `api/payroll/holds`, migrations `20260617_03/04`) — done; needs cron + revised copy.
+- **OD-2 cost-code→building importer fix** — done (main, 2026-06-19).
+- **Bilingual cost-code normalization** + `activityOf()` EN/ES resolver — done (53 codes renamed).
+- **Westend bulk-onboarding tooling** (`scripts/wy-onboard-buildings.mjs`) — 26 projects API-created; cost codes manual (see `MANUAL_TASKS_HANDOFF.md`).
+- **Remote-worker self-service portal** (`/portal?token=`) + **remote payroll run with Monitask cross-check** — done (Monitask live path pending vendor grant; mock works).
+- **Natural-language command bar / agent** (`/payroll/console`, `CommandBar`) over the audited operation layer — done.
+- **RLS / authz hardening** (PRP-01/03 + superadmin fix) — done, applied live.
+- **Settings tab for rate constants** (tax/WC/phone/OT → `payroll_global_config`) — done (migration on hardening, G1).
+- **DB week-lock trigger** (PRP-04) — done (hardening, G1).
+- **Dumpster overflow report** · **Tenant-coordination invoice label** · **User/role admin** · **Rate-coverage dashboard** · **External-projects mgmt** · **Travel-premiums config** · **Invoicing inclusion flags** · **Employee roster + audit trail** · **Audited plan/commit operation layer** · **Workyard vs DB drift detection** — all done.
+
+This is the body of evidence for the equity/progress story: the plan was delivered and substantially overdelivered.
+
+---
+
+## Top open work (prioritized — what a new owner does next)
+
+1. **Merge `hardening/payroll-waves-0-2` into main, resolving the OD-2 ↔ math-engine divergence (G1).** This is the single highest-value action: it makes `main` the *correct* engine + locking + settings, and unifies the two diverged `workyard-api.ts`. Careful merge + run the golden test. **P0.**
+2. **Backfill CREATE-TABLE migrations for the live-but-unmigrated tables (G2)** so the schema is reproducible from source. **P1.**
+3. **Add role-gated RLS write policies** where blanket policies were dropped (invoices, line items; audit others) (G3). **P1.**
+4. **Sequential approval-stage enforcement** (`payroll_advance_status`) (G4). **P1.**
+5. Persist portfolio-wizard LLC groupings (G4). **P2.**
+6. Unallocated-SMS: daily cron + revised "fix it in Workyard" copy (`UNALLOCATED_HOURS_NOTIFICATION_PRD.md`). **P2.**
+7. Westend: finish the 26 manual cost codes + 3 junk-code deletes (`MANUAL_TASKS_HANDOFF.md`). **P2 (ops).**
+8. Workyard-miles import into the existing mileage pipeline. **P3.**
+
+---
+
+## Next milestone
+**Phase 1 (Excel replacement) is effectively complete** — every module to run a full weekly payroll + billing cycle exists. The gating items to *trust it end-to-end on `main`* are **#1–#4 above** (merge hardening, backfill migrations, close RLS + sequential-approval gaps). Phase 2 (intelligence) is already largely built.
+
+---
+
+## Implementation phases (status)
+- **Phase 1 — Core Weekly Operations (Excel replacement):** ✅ built end-to-end; hardening merge + the G1–G4 closeouts make it production-trustworthy on main.
+- **Phase 2 — Intelligence Layer:** ✅ largely built (analytics dashboard, history queries, trends live; budget-threshold values still pending management input).
+- **Phase 3 — Expansion & Scalability:** 🟡 in progress (portfolio wizard + external projects built; LLC-groupings persistence + divergent invoice structures remain).
+
+---
+
+## Reference (consolidated, still current)
+
+### Core operating modules
+Workyard ingestion · timesheet adjustment · employee/rate/dept-split mgmt · adjustment manager (phone/tool/advance/deduction) · cost allocation engine · invoice generation · statement generation · ADP export+recon · history store · intelligence layer.
+
+### Timesheet adjustment UX
+Week-grid-first (properties × days+total); prominent unallocated row + header counts; inline drawer (Quick Assign/Split/Spread/Pending/Edit-Remove); separate Manual-Add + Carry-Forward; collapsible adjustment log; <30s resolution target.
+
+### Expense & reimbursement flow
+Two paths (employee mobile self-submit + in-office proxy); no-receipt-no-submission; payment-method routing (reimbursement vs bookkeeping); batch + signature; configurable weekly cutoff messaging; approver routing + Kathleen bookkeeping visibility; gas auto-allocation by visit pattern; mileage future.
+
+### Data & architecture rules
+`payroll_`-prefixed tables; read canonical snake_case layer (not AF_ staging); no hard deletes (status/deactivate); money `NUMERIC(10,2)`; constrained lowercase statuses; **RLS on all payroll tables**; department-owned tables with canonical FKs.
+
+### Data model
+Employees/rates/splits, weeks, time entries, corrections, adjustments, fee config, invoices+line items, weekly property costs, reconciliation, approvals, spread events, travel premiums, expense submissions/items/approvals, mileage, holds/notifications. Extension points: `source` semantics (`workyard`/corrected/manual/`sms_employee`/`mileage_workyard`); pending-resolution fields; carry-forward refs.
+
+### UI component standard
+Reusable advanced data table: drag-reorder/resize/visibility, sort/filter, density + local prefs, sticky headers, selected/loading/empty states, a11y + keyboard, optional bulk actions + CSV export. Default primitive for high-throughput manager review.
+
+### Operational standards
+Logic in domain hooks/services not views; explicit loading/error/empty states; auditability of all overrides/approvals/corrections; additive + effective-dated config over hardcoded constants; approval transitions persist actor+timestamp+notes; locked prior weeks → carry-forward in current week.
