@@ -99,19 +99,23 @@ For each hourly time entry, resolve the effective rate using `resolveRateAsOf(em
 
 **CF-2 — Overtime premium at 1.5× gated on `ot_allowed` (fixes C-1)**  
 OT wages = `ot_hours × resolvedRate × (emp.ot_allowed ? 1.5 : 1.0)`.  
-`ot_allowed` defaults to `false` on the `PayrollEmployee` type, so any employee without the flag set continues to receive 1× until the operator sets it. [Needs domain confirmation — see Open Decision OD-1]
+`ot_allowed` defaults to `false` on the `PayrollEmployee` type, so any employee without the flag set continues to receive 1× until the operator sets it. [Resolved OD-1 (2026-06-19): confirmed — 1.5× is gated on `ot_allowed`.]
 
-**CF-3 — Salaried employee property-cost allocation (fixes C-6)**  
-For salaried employees (`emp.type === 'salaried'`), derive an effective hourly cost rate of `weekly_rate / 40`. Allocate that cost to properties using the same time-entry `property_id` proportionality as hourly employees. If no entries exist for the week, no cost is allocated (the salaried wage still flows to the employee summary). [Needs domain confirmation — see Open Decision OD-2]
+**CF-3 — Salaried / office property-cost allocation (fixes C-6)**  
+[Resolved OD-2 (2026-06-19): allocation is **per time-entry by classified location**, not a single per-employee spread, and is **derived at Workyard ingestion** — employees are not asked to classify.]
+1. **Office work at the office cluster → overhead → portfolio spread.** When an entry's ingested Workyard cost code is *office* **and** its location is the office geofence/cluster, classify it as overhead (`is_overhead_spread = true`) and route its cost through the existing unit-count portfolio-spread engine (the same path as salaried/office overhead — see the `is_overhead_spread` work). Cost is distributed across all active properties proportional to unit count, not to the employee's logged property.
+2. **Work at a property (incl. office-coded) → that property.** Any entry whose location is a real property is charged to that property's `property_id`, even when the cost code is *office* (it is simply tagged office for that property).
+3. **Classification is an ingestion responsibility.** The Workyard ingestion path sets the overhead vs. property classification from the data it already pulls (cost code + location cluster); the payroll engine reads the resulting flag/`property_id` and does not re-derive it from employee input.
+4. Effective cost basis for a salaried employee remains `weekly_rate` for the week (hourly-equivalent `weekly_rate / 40` only where a per-hour figure is needed, e.g. OT-eligible salaried); the **allocation target** is decided by (1)/(2) above, not by recorded-hours proportionality across the employee's own properties.
 
 **CF-4 — Corrected tax and WC base (fixes C-MED)**  
-The tax/WC base is `regular_wages + ot_wages` only. `phone_reimbursement`, `other_adjustments`, and advances are excluded from the tax base. Gross pay (the sum reported to ADP) remains `regular_wages + ot_wages + phone_reimbursement + other_adjustments − advances` to match current ADP expectations. The two values (`taxable_wages` and `gross_pay`) are tracked separately in `EmployeePaySummary`. [Needs domain confirmation — see Open Decision OD-3]
+The tax/WC base is `regular_wages + ot_wages` only. `phone_reimbursement`, `other_adjustments`, and advances are excluded from the tax base. Gross pay (the sum reported to ADP) remains `regular_wages + ot_wages + phone_reimbursement + other_adjustments − advances` to match current ADP expectations. The two values (`taxable_wages` and `gross_pay`) are tracked separately in `EmployeePaySummary`. [Resolved OD-3 (2026-06-19): confirmed — tax/WC base excludes phone + advances.]
 
 **CF-5 — Property-authoritative management fee, consistent total (fixes C-7)**  
-`getMgmtFeeRate` receives `weekStart` (not `new Date()`). The per-employee `management_fee` field on `EmployeePaySummary` is removed or zeroed; it was a by-product of the now-replaced employee-level fee calculation. `total_mgmt_fee` in `PayrollCalculationResult` becomes the sum of `property_costs[*].mgmt_fee` (the portfolio-rate × (labor+spread) path, which already exists at `calculations.ts:212` and is correct). [Needs domain confirmation — see Open Decision OD-4]
+`getMgmtFeeRate` receives `weekStart` (not `new Date()`). The per-employee `management_fee` field on `EmployeePaySummary` is removed or zeroed; it was a by-product of the now-replaced employee-level fee calculation. `total_mgmt_fee` in `PayrollCalculationResult` becomes the sum of `property_costs[*].mgmt_fee` (the portfolio-rate × (labor+spread) path, which already exists at `calculations.ts:212` and is correct). [Resolved OD-4 (2026-06-19): confirmed — property-level fee is authoritative.]
 
 **CF-6 — Prefund fee inclusion (fixes C-7d)**  
-`required_prefund` formula to confirm: `gross_pay + payroll_tax + workers_comp [+ total_mgmt_fee?]`. [Needs domain confirmation — see Open Decision OD-5]
+`required_prefund = gross_pay + payroll_tax + workers_comp + total_mgmt_fee`. [Resolved OD-5 (2026-06-19): confirmed — prefund **includes** the management fee; the fee is collected at prefund time.]
 
 **CF-7 — ADP-export page calls `calculatePayroll` (collapses ADP-dup)**  
 `src/app/payroll/[weekId]/adp-export/page.tsx` fetches the two new data sets (`payroll_employee_rates`, week `week_start`) in its existing `Promise.all`, passes them to `calculatePayroll`, and maps `employee_summaries` to `ADPRow`. The local `summary` accumulation loop is deleted.
@@ -247,13 +251,16 @@ Each phase is independently shippable and reversible. Phase 1 gates the build on
 
 2d. In the time-entry loop: change OT wages to `(entry.ot_hours ?? 0) * resolvedRate * (emp.ot_allowed ? 1.5 : 1.0)`.
 
-2e. Add salaried-to-property allocation (CF-3) in the Method A block after the hourly loop: for each salaried employee, compute `effectiveCostRate = emp.weekly_rate / 40`, iterate their entries, and accumulate `propLaborCost[entry.property_id]` by `(entry.regular_hours ?? 0) * effectiveCostRate`.
+2e. Add salaried/office allocation (CF-3) in the Method A block after the hourly loop. For each salaried/office employee, iterate their entries and route each entry's cost by its **ingestion-set classification**, not by recorded-hours proportionality:
+   - Entry classified overhead (`is_overhead_spread` — office cost code + office-cluster location): add its cost to the portfolio unit-count spread pool (the existing `is_overhead_spread` engine), not to a single `property_id`.
+   - Entry at a real property (incl. office-coded at a property): accumulate `propLaborCost[entry.property_id]`.
+   Cost basis is the salaried `weekly_rate` for the week (use `weekly_rate / 40` only where a per-hour figure is genuinely required, e.g. OT-eligible salaried). Do **not** re-derive the overhead/property classification here — read the flag/`property_id` the ingestion path set.
 
 2f. Add `taxable_wages` field: computed as `regular_wages + ot_wages` before the adjustment loop. Add it to `EmployeePaySummary`. Change `payroll_tax` and `workers_comp` to use `taxable_wages` as the base, not `gross_pay`.
 
 2g. Change `total_mgmt_fee` aggregation: `property_costs.reduce((s, p) => s + p.mgmt_fee, 0)` (sum of property fees). Zero out `employee_summaries[*].management_fee` (keep the field, set to 0 — no callers break). Update `getMgmtFeeRate` call inside `calculatePayroll` employee loop to pass `weekStart`.
 
-2h. `required_prefund`: to be updated once OD-5 is confirmed. In the interim, retain the existing formula to avoid unintentional cash-flow impact.
+2h. `required_prefund` (OD-5 resolved): set `required_prefund = gross_pay + payroll_tax + workers_comp + total_mgmt_fee` — the management fee is now collected at prefund time. Note this is a cash-flow-increasing change; call it out in the release notes.
 
 **Verification:**  
 - `grep "new Date()" src/lib/payroll/calculations.ts` returns zero results.  
@@ -358,13 +365,13 @@ Each phase is independently shippable and reversible. Phase 1 gates the build on
 
 ## 9. Open Decisions
 
-| ID | Question | Defensible Default | Label |
+| ID | Question | Resolution (2026-06-19) | Label |
 |----|----------|--------------------|-------|
-| OD-1 | Is OT premium 1.5× intended, and should it be gated on `ot_allowed` (i.e., only employees with the flag set earn time-and-a-half)? | Yes, 1.5× gated on `ot_allowed = true`; employees without the flag continue at 1× until the operator sets it | [Needs domain confirmation] |
-| OD-2 | For salaried employees, is the property allocation rate `weekly_rate / 40` allocated proportionally by recorded hours? | Yes — `weekly_rate / 40` as the effective hourly cost; allocate by `entry.regular_hours / total_salaried_hours_that_week * weekly_rate` | [Needs domain confirmation] |
-| OD-3 | Does the tax and WC base exclude phone reimbursements and `other_adjustments`, and are advances excluded from the tax base rather than reducing it? | Yes — taxable base = `regular_wages + ot_wages` only; advances do not affect taxable wages | [Needs domain confirmation] |
-| OD-4 | Is the property-level portfolio fee authoritative for billing purposes, with `total_mgmt_fee` being the sum of property fees (not the per-employee global-rate fee)? | Yes — property-level fee is authoritative; per-employee `management_fee` field is deprecated to 0 | [Needs domain confirmation] |
-| OD-5 | Does `required_prefund` include management fee (i.e., is the fee collected at prefund time)? | Exclude fee from prefund (current behavior) unless the org confirms upfront fee collection | [Needs domain confirmation] |
+| OD-1 | Is OT premium 1.5× intended, and should it be gated on `ot_allowed` (i.e., only employees with the flag set earn time-and-a-half)? | **Yes** — 1.5× gated on `ot_allowed = true`; employees without the flag continue at 1× until the operator sets it | ✅ Resolved |
+| OD-2 | For salaried/office employees, how is property cost allocated? | **Per time-entry by classified location, derived at Workyard ingestion** (not per-employee, not by recorded-hours proportionality): office-code **+ office-cluster location** → overhead → unit-count **portfolio spread** (`is_overhead_spread`); office-code (or any work) **at a property** → charged to that `property_id`, tagged office. Classification is inferred from ingested cost code + location, not entered by employees. See CF-3. | ✅ Resolved |
+| OD-3 | Does the tax and WC base exclude phone reimbursements and `other_adjustments`, and are advances excluded from the tax base rather than reducing it? | **Yes** — taxable base = `regular_wages + ot_wages` only; advances do not affect taxable wages | ✅ Resolved |
+| OD-4 | Is the property-level portfolio fee authoritative for billing purposes, with `total_mgmt_fee` being the sum of property fees (not the per-employee global-rate fee)? | **Yes** — property-level fee is authoritative; per-employee `management_fee` field is deprecated to 0 | ✅ Resolved |
+| OD-5 | Does `required_prefund` include management fee (i.e., is the fee collected at prefund time)? | **Yes** — prefund includes `total_mgmt_fee`; the fee is collected at prefund time | ✅ Resolved |
 | OD-6 | If `ot_allowed` column is absent from the live `payroll_employees` table (Phase 1 gate): should the build proceed with `ot_multiplier = 1.0` for all employees and a schema-hook column addition deferred to PRP-05? | Yes — proceed with 1.0 for all; column addition is a PRP-05 schema-hook | [Unverified — Phase 1 gate] |
 
 ---
