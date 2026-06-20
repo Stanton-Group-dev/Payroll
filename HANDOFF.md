@@ -1,23 +1,29 @@
-# Payroll System — Session Handoff
+# Payroll System — Handoff
 
-_Last updated: 2026-06-04_
+_Last updated: 2026-06-20_
 
-This captures the state of the repo after a stabilization session focused on **getting
-the app runnable and testable**. It is meant to let the next person (or session) pick up
-without re-discovering everything.
+The single doc to read first when taking over. Status/roadmap lives in `PLAN.md`; decisions in `DECISIONS_LOG.md`; Workyard in `WORKYARD_GUIDE.md`; remaining manual ops in `MANUAL_TASKS_HANDOFF.md`. This file is the orientation + setup + "what to do next."
 
 ---
 
-## TL;DR — current state
+## TL;DR — where the project is
 
-- **The app builds, boots, connects to a healthy seeded DB, and login works.** It is
-  ready for manual/QA testing of the existing ("partial") features.
-- **Biggest fix:** login was broken for *everyone* — the Supabase publishable key
-  hardcoded in `src/lib/supabase/config.ts` is stale/revoked. The correct active key is
-  now in a local (gitignored) `.env.local`. See "Required local setup" below.
-- **A test login + a dummy-data import path now exist** so the API-pull import flow can be
-  exercised end-to-end with no Workyard credentials.
-- Several real bugs fixed (React hooks crash, broken lint). See "What changed".
+- **Phase 1 (Excel replacement) is built end-to-end, and the system overdelivered** — all 15 originally-planned features exist, plus ~23 more (NL command bar, RLS hardening, unallocated-SMS, dumpster report, analytics, mileage, remote-worker portal, etc.). Verified against code 2026-06-20; see `PLAN.md`.
+- **The #1 thing to do is merge the hardening branch** (see next section). Until that lands, `main` runs the *older* payroll engine and lacks DB week-locking.
+- The app builds, boots, connects to the live seeded DB, and login works. Ready for QA.
+
+---
+
+## ⚠️ #1 priority: the two worktrees are diverged — merge them
+
+There are **two working copies** of this repo, on two branches, and they have **split-brain changes** that must be reconciled:
+
+| Worktree | Branch | Has |
+|---|---|---|
+| `C:/01-repos/Payroll` | `fix/payroll-office-spread-weekly-ot` (merged to `main` via PRs) | the **OD-2** cost-code→building importer fix, bilingual cost codes, Westend onboarding, PRP-01/03/05, the older payroll engine |
+| `C:/01-repos/Payroll-hardening` | `hardening/payroll-waves-0-2` (8 commits, **NOT merged**) | the **correct payroll engine** (PRP-02: OT/tax-base/fee/prefund fixes, largest-remainder rounding, config-driven rates, golden test), the **DB week-lock trigger** (PRP-04), the **rate-settings** migration |
+
+**Neither branch has everything.** `main` has OD-2; hardening has the engine fix — and both edited `workyard-api.ts`, `config.ts`, `DECISIONS_LOG.md`. **First task: merge `hardening/payroll-waves-0-2` into `main`, resolve those conflicts carefully, and run the golden test.** This makes `main` the correct, locked, config-driven engine. Everything else in "Top open work" is secondary to this.
 
 ---
 
@@ -25,164 +31,76 @@ without re-discovering everything.
 
 ```bash
 npm install            # also wires the gitleaks pre-commit hook via "prepare"
-# create .env.local (see below)
-npm run dev            # http://localhost:3000  → app at /payroll/login
+# secrets come from Infisical (preferred) or a local .env.local
+infisical run --env=prod -- npm run dev     # http://localhost:3000 → /payroll/login
+# or: create .env.local (below) and: npm run dev
 ```
 
-Quality gates (all currently green):
+Quality gates:
 ```bash
-npx tsc --noEmit       # types
-npm run lint           # eslint (next/core-web-vitals)
-npm run build          # production build, 24 routes
+npm run typecheck      # tsc --noEmit   (pre-existing pdf.ts puppeteer stub errors are expected unless deps installed)
+npm run lint
+npm test               # vitest (golden engine test lives on the hardening branch)
+npm run build
 ```
 
-### Required local setup: `.env.local` (gitignored — NOT committed)
+**Secrets (Infisical, project `b974f539-54dc-4687-9afd-941d95d434c9`):** the app reads Supabase, Workyard, Twilio, Anthropic, Monitask keys from Infisical at runtime — they are **not** in files. CLI auth is `infisical login` (Stanton self-hosted instance). There is no `.infisical.json` checked in; run with `--projectId=… --env=prod --recursive` or `infisical init` once.
 
-The Supabase fallback baked into `config.ts` is **revoked**, so without this file logins
-fail with `"Unregistered API key"`. Create `.env.local` with:
-
+**Minimal `.env.local`** (gitignored) if not using Infisical:
 ```bash
 NEXT_PUBLIC_SUPABASE_URL=https://wkwmxxlfheywwbgdbzxe.supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<active publishable key>   # from Supabase project / Infisical
-WORKYARD_MOCK=1                                                 # dummy import data, no creds needed
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=<active sb_publishable_ key>
+WORKYARD_MOCK=1            # deterministic dummy timecards, no Workyard creds needed
+ANTHROPIC_API_KEY=<key>   # only needed for the NL command bar
 ```
 
-- The **active publishable key** (browser-safe `sb_publishable_...`) is on the Supabase
-  project "Stanton Main DB" and should be stored in Infisical. Do not paste it into any
-  committed file.
-- `WORKYARD_MOCK=1` makes the Workyard API-pull return deterministic dummy time cards.
+---
+
+## Environments & data
+
+- **App:** Next.js on **Vercel** (`.vercel/` linked). Deploys on merge to `main`.
+- **DB:** Supabase **"Stanton Main DB"** `wkwmxxlfheywwbgdbzxe` — **shared** across Stanton apps. RLS hardened via PRP-01 (anon DML revoked, blanket policies dropped, role-gated writes). Seeded: portfolios, ~72 properties, hourly employees, cost codes, payroll weeks.
+- **Workyard:** org `25316`. **Read `WORKYARD_GUIDE.md`** for the data model + the measured API capability matrix (what the API can/can't do) before any Workyard work.
+- **Test login:** `claude-test@payroll.test` = `superadmin`, active. Password vaulted in Infisical `/test-users` → `MAIN_TEST_PASSWORD` (registry: `stanton-control/context/test-users.md`).
 
 ---
 
-## Test credentials & data
+## The canonical docs (don't re-derive these)
 
-- **Test login:** `claude-test@payroll.test` — now a true **`superadmin`** (`is_active = true`),
-  so it unlocks the CommandBar and all admin surfaces. **Password is vaulted in Infisical
-  `/test-users` → `MAIN_TEST_PASSWORD`** (never in-repo). Throwaway test identity, lives in the
-  live DB. Canonical registry of test users across all Stanton auth realms (incl. how to
-  retrieve/rotate): `stanton-control/context/test-users.md`.
-- **Database:** Supabase project `wkwmxxlfheywwbgdbzxe` ("Stanton Main DB"), healthy,
-  RLS enabled with real policies. Seeded: 9 portfolios, 72 properties, 11 hourly
-  employees, 48 cost codes, 1 draft payroll week (week_start 2026-03-08).
-- **Time data:** `payroll_time_entries` and `payroll_employee_rates` are **empty**. Import
-  a mock week to populate entries; rates must be entered via the Employees & Rates page
-  (or seeded) before a full payroll calculation will produce gross pay.
-
-### Testing the import flow
-1. Log in → **Workyard Import**.
-2. Select the draft week (Mar 8, 2026), **Pull from API** (mock returns ~62 rows).
-3. Most rows auto-match; a few are intentionally flagged (overhead, unknown property `S9999`,
-   PTO, split-property) to exercise the **Correction Queue**.
-4. Import → review on the week dashboard / timesheets.
+| Doc | Use it for |
+|---|---|
+| `PLAN.md` | Roadmap + **verified** per-feature build status (planned-vs-built) + top open work |
+| `DECISIONS_LOG.md` | Every settled decision + the live Workyard/payroll constraints (§0.1–0.16). Check before re-asking. |
+| `WORKYARD_GUIDE.md` | Workyard platform: data model, features, **API capability matrix**, onboarding |
+| `MANUAL_TASKS_HANDOFF.md` | Remaining manual Workyard UI tasks (26 Westend cost codes, 3 junk-code deletes) |
+| `audit/prps/01–05` | The hardening specs (RLS, single engine, API authz, locking, reliability) |
+| `*_PRD.md` | Per-feature specs (unallocated-SMS, in-app-approval, expense, dumpster, etc.) |
+| `scripts/wy-*.mjs` | Workyard tooling (pull/list/onboard/rename); run via the Infisical command above |
 
 ---
 
-## What changed this session (commits on `main`, NOT yet pushed)
+## Top open work (from PLAN.md, prioritized)
 
-`main` is **ahead of `origin/main`** by these commits (push when ready):
-
-1. `chore: add gitleaks secret-scanning guardrail and Bitwarden env reference`
-   - `.githooks/pre-commit` (gitleaks staged scan), `prepare` script auto-wires hooksPath,
-     `.env.example` placeholder reference, `.gitignore` hardening.
-   - **gitleaks must be installed** to actually scan: `winget install Gitleaks.Gitleaks`.
-2. `fix: rules-of-hooks crash in InlineDrawer + restore working lint`
-   - `InlineDrawer.tsx` called 13 `useState` hooks after an early return → "rendered more
-     hooks than previous render" crash when the selected timesheet cell changed. Guard moved
-     below all hooks; initializers made null-safe.
-   - Added `.eslintrc.json`; `npm run lint` previously had no config and hung on a prompt.
-3. `feat: add WORKYARD_MOCK dummy data path for API-pull import testing`
-   - `src/lib/payroll/workyard-mock.ts` + wiring in `workyard-api.ts` and the timecards route.
-
-Local-only (gitignored, not committed): `.env.local`.
+1. **Merge the hardening branch** (G1, above). **P0.**
+2. **Backfill `CREATE TABLE` migrations** for live-but-unmigrated tables (employee rates/splits, mgmt-fee config, ADP recon, expenses, weekly costs, thresholds) so schema is reproducible from source. **P1.**
+3. **Add role-gated RLS write policies** where blanket ones were dropped (invoices, line items; audit the rest). **P1.**
+4. **Sequential approval-stage enforcement** (`payroll_advance_status`) — stages can currently be set without prerequisite checks. **P1.**
+5. Persist the portfolio-wizard LLC groupings. **P2.**
+6. Unallocated-SMS: daily cron + revised "fix it in Workyard" copy. **P2.**
+7. Westend: the 26 manual cost codes + 3 junk deletes (`MANUAL_TASKS_HANDOFF.md`). **P2 (ops).**
+8. Workyard-miles import into the existing mileage pipeline. **P3.**
 
 ---
 
-## Pending / next steps
+## Architecture note — the audited operation layer (still current)
 
-1. ~~**Promote the test user to admin.**~~ **DONE (2026-06-16):** `claude-test@payroll.test`
-   is now `role='superadmin', is_active=true` on the Main DB `profiles` row. See
-   `stanton-control/context/test-users.md`.
-2. **Fix the key in the deployed env.** Set `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` to the
-   active key in Vercel (may already be set). **Recommended:** remove the hardcoded fallback
-   in `src/lib/supabase/config.ts` so a revoked key can never silently break login again.
-3. **Seed/enter employee rates** before testing a full payroll calculation (0 rows now).
-4. **Push `main`** to origin when the above is reviewed.
+Every payroll mutation goes through a named **Operation**: Zod-validated input → side-effect-free `plan()` (preview with changes/warnings/**blockers**) → audited `commit()` writing an append-only `payroll_audit_log` row (actor, op, input, result, original NL prompt). `src/lib/payroll/operations/`. The execute routes **re-plan server-side** and never trust the client preview. The NL command bar (`/payroll/console`, `CommandBar`) and the admin UIs both converge on this path. Deterministic resolvers (fuzzy entity match, NL dates) live in `src/lib/payroll/resolve/` — no LLM in the actual match.
 
-## Agentic command layer + audited operations (added 2026-06-04)
+---
 
-A new backbone was added so payroll mutations are validated, previewable, and
-audited — and so a natural-language command bar can drive them safely.
+## Known gotchas
 
-**Architecture (one validated path for every write):**
-- `payroll_audit_log` table (live DB) — append-only, RLS, no UPDATE/DELETE policies
-  (mirrors the `user_access_log` convention). Records actor, operation, input,
-  result, and the original NL prompt.
-- `src/lib/payroll/operations/` — the Operation layer. Each op has a Zod schema,
-  a side-effect-free `plan()` (returns a preview: changes / warnings / **blockers**),
-  and an audited `commit()`. `core.ts` exposes `previewOperation` / `executeOperation`.
-  Implemented (15 ops): `time_entry.add` (property / portfolio-spread / unallocated),
-  `time_entry.adjust`, `time_entry.remove`; `employee.add/update/deactivate/reactivate`
-  (`operations/employees.ts` — rate changes append to `payroll_employee_rates`,
-  soft-deactivate only); `external_project.add/update/deactivate/reactivate`
-  (`operations/externalProjects.ts` — non-portfolio client work like "Zimmerman",
-  billed to a named client). All soft-delete, no hard deletes. Registry in
-  `operations/index.ts`.
-- `src/lib/payroll/resolve/` — deterministic resolvers: fuzzy entity match
-  (`entities.ts` + `text.ts`) and natural-language dates (`dates.ts`, Sunday-start
-  weeks, plus `resolveWeekForDate` / week-lock check). **No LLM in the actual match.**
-- `src/lib/payroll/agent/` — Claude tool-use loop (`run.ts`, model
-  `claude-sonnet-4-6`, override via `PAYROLL_AGENT_MODEL`). The model resolves
-  names→ids via tools then calls `propose_operation`; the server returns a
-  **preview only**. Nothing is written until the user confirms.
-- Routes: `POST /api/payroll/agent` (chat → preview) and
-  `POST /api/payroll/agent/execute` (confirm → validate+commit+audit, source=agent).
-  Plus general UI-sourced `POST /api/payroll/operations/preview` and
-  `POST /api/payroll/operations/execute` (source=ui) — the same audited path for
-  any UI surface to converge onto. All execute paths **re-plan server-side** and
-  never trust a client preview.
-- UI: `components/payroll/CommandBar.tsx` + `hooks/payroll/usePayrollAgent.ts`,
-  wired into the timesheets page (refreshes via the hook's `refetch`).
-
-**Example that works end-to-end:** "add 10 hours to stan for wednesday of last week
-across the park portfolio" → resolves Stan Baldyga + Park Portfolio (`af-portfolio-11`,
-6 properties, unit-weighted spread) + 2026-05-27, shows a preview, then on confirm
-writes a spread event + per-property entries + an audit row. (Note: 2026-05-27 has
-no payroll week yet, so the preview will show a blocker until that week exists —
-the only seeded week is Mar 8–14.)
-
-**Required to use the NL bar:** set `ANTHROPIC_API_KEY` in `.env.local` (see
-`.env.example`). Without it the bar returns a graceful 503; everything else is unaffected.
-
-**Deps added:** `zod`, `@anthropic-ai/sdk`. **Gates (all green):** `tsc --noEmit`,
-`npm run lint` (only the pre-existing `expenses/page.tsx` `<img>` warning),
-`npm run build` (**30 routes**, including the 4 agent/operations API routes).
-Schema logic unit-tested via `scripts/verify-employee-ops.mts` (24/24 — employee
-type↔rate pairing, external-project required fields, "at least one field" on
-updates, uuid validation) and resolvers via `scripts/verify-resolvers.mts`. Live
-schema re-confirmed for every table the ops touch (employee/rate/external-project
-columns, the `payroll_time_entries→payroll_weeks` FK the open-entry check embeds,
-append-only audit policies). All 4 routes recompile and auth-gate (401) on the
-running dev server.
-
-**⚠ DEMO BLOCKER — `ANTHROPIC_API_KEY` is NOT set in `.env.local`.** The NL command
-bar returns a graceful 503 until it is present; nothing to demo until the key is
-added (then restart `npm run dev`). This is the single thing gating Dean's test of
-the command bar. Everything else (operations, audit, build) is ready.
-
-**Not yet done (next steps for this track):**
-- **Set `ANTHROPIC_API_KEY`** (see `.env.example`) and restart dev — required for the bar.
-- Converge the existing admin UIs onto `/api/payroll/operations/*` (the route exists
-  and is smoke-tested). Deliberately NOT done pre-demo to avoid touching working pages:
-  the `employees` page allows rate-less adds + has dept-splits/manual rate-dating not
-  yet modeled by `employee.*`, and the `external-projects` edit form toggles `is_active`
-  (which is `deactivate`/`reactivate`, not `update`). Each page needs per-field handling
-  + a click-test under auth before rewiring.
-- Add `cost_code.*` / job-level ops if "jobs" should be distinct from external projects
-  (currently a job = an external project billed to a client; no separate jobs table exists).
-- These changes are uncommitted on `main` (working tree) — review then commit/push.
-
-## Known debt (pre-existing, not addressed here)
-- RLS: ~38 payroll policies are `USING (true)` (any authenticated user sees all rows) —
-  must be tightened to portfolio-level before multi-portfolio rollout. Tracked in `PLAN.md`.
-- Many Phase-1 features remain **unbuilt by design** (cost allocation engine, approval gates,
-  invoice/statement generation, ADP reconciliation). See `PLAN.md` for status per feature.
+- **Shared prod DB** — changes affect other Stanton apps; prefer additive/reversible migrations.
+- **Schema-not-in-source** (G2 above) — several live tables have no migration in the repo; don't assume the repo's migrations fully describe the DB.
+- **Workyard API is limited** — no create-cost-code, no project-update, no time-card-write endpoints. See `WORKYARD_GUIDE.md` before planning automation.
+- **`pdf.ts` typecheck errors** (puppeteer/chromium) are expected unless those optional deps are installed; not a regression.
