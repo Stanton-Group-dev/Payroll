@@ -5,7 +5,7 @@ import { ChevronRight, ChevronDown, Briefcase, Building2, AlertTriangle } from '
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/hooks/payroll/useAuth'
 import { isDeleteMarked } from '@/lib/payroll/properties'
-import { PageHeader, InfoBlock, SectionDivider } from '@/components/form'
+import { PageHeader, InfoBlock, SectionDivider, Toggle } from '@/components/form'
 
 interface Portfolio {
   id: string
@@ -24,31 +24,6 @@ interface Property {
 }
 
 const UNASSIGNED = '__unassigned__'
-
-/** Accessible on/off switch styled with the app's design tokens. */
-function Toggle({
-  on, disabled, onChange, label,
-}: { on: boolean; disabled?: boolean; onChange: (next: boolean) => void; label: string }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={on}
-      aria-label={label}
-      disabled={disabled}
-      onClick={() => onChange(!on)}
-      className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${
-        on ? 'bg-[var(--primary)]' : 'bg-[var(--border)]'
-      } ${disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
-    >
-      <span
-        className={`inline-block h-4 w-4 transform rounded-full bg-white shadow-sm transition-transform ${
-          on ? 'translate-x-4' : 'translate-x-0.5'
-        }`}
-      />
-    </button>
-  )
-}
 
 export default function InvoicingSettingsPage() {
   const { isAdmin } = useAuth()

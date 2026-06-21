@@ -154,6 +154,24 @@ export function useAdminGlobalConfig() {
     await load()
   }, [config, load])
 
+  const saveNotificationsEnabled = useCallback(async (enabled: boolean) => {
+    const supabase = createClient()
+    const userId = (await supabase.auth.getUser()).data.user?.id ?? ''
+    if (config) {
+      const { error: err } = await supabase
+        .from('payroll_global_config')
+        .update({ unallocated_notifications_enabled: enabled, created_by: userId })
+        .eq('id', config.id)
+      if (err) throw new Error(err.message)
+    } else {
+      const { error: err } = await supabase
+        .from('payroll_global_config')
+        .insert({ unallocated_notifications_enabled: enabled, created_by: userId })
+      if (err) throw new Error(err.message)
+    }
+    await load()
+  }, [config, load])
+
   const setPropertyApprover = useCallback(async (propertyId: string, userId: string | null) => {
     const supabase = createClient()
     const { error: err } = await supabase
@@ -164,5 +182,5 @@ export function useAdminGlobalConfig() {
     await load()
   }, [load])
 
-  return { config, properties, users, loading, error, refetch: load, saveCutoff, savePrefundToggle, saveRateSettings, setPropertyApprover }
+  return { config, properties, users, loading, error, refetch: load, saveCutoff, savePrefundToggle, saveRateSettings, saveNotificationsEnabled, setPropertyApprover }
 }

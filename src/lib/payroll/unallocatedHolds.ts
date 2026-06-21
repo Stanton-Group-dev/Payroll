@@ -84,14 +84,20 @@ export async function detectUnallocatedEmployees(
     .sort((a, b) => b.unallocated_hours - a.unallocated_hours)
 }
 
-/** The SMS body sent to an employee who's being held for unallocated hours. */
+/**
+ * The SMS body sent to an employee with unallocated hours.
+ *
+ * Self-service framing on purpose: tell them exactly what's wrong and that THEY fix it
+ * in Workyard — not "come to the office and explain yourself." Unassigned hours can't be
+ * paid, so the fix (assign them to a property) is theirs to make before the week closes.
+ */
 export function composeUnallocatedSms(emp: UnallocatedEmployee, week: WeekRow): string {
   const hrs = emp.unallocated_hours === 1 ? '1 hour' : `${emp.unallocated_hours} hours`
   const first = emp.name.split(' ')[0] || emp.name
   return (
-    `Stanton Management Payroll: ${first}, you have ${hrs} unallocated for the week of ` +
-    `${week.week_start}. Your pay is on hold until this is resolved. Please come into the ` +
-    `office with a written reason explaining why these hours weren't assigned to a property.`
+    `Stanton Payroll: ${first}, you have ${hrs} from the week of ${week.week_start} not yet ` +
+    `assigned to a property in Workyard. Unassigned hours can't be paid — please open Workyard ` +
+    `and assign them. Questions? Call the office.`
   )
 }
 
@@ -111,10 +117,36 @@ export interface ApplyHoldsResult {
  * Apply (or refresh) holds for every employee over the threshold this week and
  * text each one. Idempotent on (week, employee): re-running updates the snapshot
  * and re-sends. Returns a per-employee summary including the send outcome.
+ *
+ * The two optional guards below default OFF, so the manual "Hold & notify" button —
+ * which omits them — keeps its existing behavior (always re-arm, always re-send). The
+ * unattended daily cron passes both so it doesn't double-text or fight a manager.
  */
 export async function applyUnallocatedHolds(
   admin: SupabaseClient,
-  opts: { weekId: string; userId: string | null; threshold?: number },
+  opts: {
+    weekId: string
+    userId: string | null
+    threshold?: number
+    /**
+     * Skip texting an employee who already got a notification for this week within the
+     * last N hours (their hold snapshot is still refreshed). Stops the cron + a manual
+     * Apply on the same day from sending two texts.
+     */
+    dedupeWindowHours?: number
+    /**
+     * When true, leave alone any employee whose hold a manager already resolved
+     * (status 'released' or 'waived') this week — don't re-arm it or re-text them.
+     */
+    respectResolvedHolds?: boolean
+    /**
+     * When true, a per-employee failure (e.g. a hold write erroring) is recorded as a
+     * 'failed' entry and the run continues to the next employee instead of aborting the
+     * batch. The unattended cron sets this so one bad row can't silently suppress everyone
+     * after it; the manual button omits it and still throws on the first error.
+     */
+    continueOnError?: boolean
+  },
 ): Promise<ApplyHoldsResult> {
   const threshold = opts.threshold ?? UNALLOCATED_HOLD_THRESHOLD_HOURS
 
@@ -126,9 +158,38 @@ export async function applyUnallocatedHolds(
   if (weekErr || !week) throw new Error(weekErr?.message ?? 'Week not found')
 
   const candidates = await detectUnallocatedEmployees(admin, opts.weekId, threshold)
+
+  // Employees a manager already released/waived this week — the cron defers to them.
+  const resolvedEmp = new Set<string>()
+  if (opts.respectResolvedHolds && candidates.length > 0) {
+    const { data: holds } = await admin
+      .from('payroll_employee_holds')
+      .select('employee_id, status')
+      .eq('payroll_week_id', opts.weekId)
+      .in('status', ['released', 'waived'])
+    for (const h of holds ?? []) resolvedEmp.add(h.employee_id)
+  }
+
+  // Employees already texted within the de-dup window — refresh their hold but don't re-send.
+  const recentlyNotified = new Set<string>()
+  if (opts.dedupeWindowHours && candidates.length > 0) {
+    const since = new Date(Date.now() - opts.dedupeWindowHours * 3_600_000).toISOString()
+    const { data: notes } = await admin
+      .from('payroll_notifications')
+      .select('employee_id, status, created_at')
+      .eq('payroll_week_id', opts.weekId)
+      .eq('channel', 'sms')
+      .in('status', ['sent', 'dry_run'])
+      .gte('created_at', since)
+    for (const n of notes ?? []) if (n.employee_id) recentlyNotified.add(n.employee_id)
+  }
+
   const held: ApplyHoldsResult['held'] = []
 
   for (const emp of candidates) {
+    // Defer to a manager who already released/waived this hold — don't undo their call.
+    if (opts.respectResolvedHolds && resolvedEmp.has(emp.employee_id)) continue
+
     // Upsert the hold, re-arming it to 'held' even if a stale 'released' row exists.
     const { error: holdErr } = await admin
       .from('payroll_employee_holds')
@@ -147,7 +208,32 @@ export async function applyUnallocatedHolds(
         },
         { onConflict: 'payroll_week_id,employee_id' },
       )
-    if (holdErr) throw new Error(holdErr.message)
+    if (holdErr) {
+      // Manual path (no continueOnError): throw on the first failure, exactly as before.
+      // Cron path: record this employee as failed and move on so the rest still get held.
+      if (!opts.continueOnError) throw new Error(holdErr.message)
+      held.push({
+        employee_id: emp.employee_id,
+        name: emp.name,
+        unallocated_hours: emp.unallocated_hours,
+        notification_status: 'failed',
+        notification_error: `Hold failed: ${holdErr.message}`,
+      })
+      continue
+    }
+
+    // Already texted within the window: the hold snapshot above is refreshed, but we
+    // don't send again (or log a second outbox row). Surfaced as 'skipped' in the summary.
+    if (recentlyNotified.has(emp.employee_id)) {
+      held.push({
+        employee_id: emp.employee_id,
+        name: emp.name,
+        unallocated_hours: emp.unallocated_hours,
+        notification_status: 'skipped',
+        notification_error: `Already notified within ${opts.dedupeWindowHours}h`,
+      })
+      continue
+    }
 
     const body = composeUnallocatedSms(emp, week as WeekRow)
     let status: PayrollNotification['status']
