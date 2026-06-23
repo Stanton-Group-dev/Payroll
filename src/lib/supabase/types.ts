@@ -526,3 +526,28 @@ export interface PayrollExpenseApproval {
   created_at: string
   created_by: string | null
 }
+
+// ── New Project Wizard (PRP-06) ────────────────────────────────────────────
+// Maps an owner LLC to its Workyard customer id, so the wizard can create a
+// project under the right customer. Config, not hardcode (DECISIONS_LOG §0.13).
+export interface PayrollWorkyardCustomerMap {
+  id: string
+  owner_llc: string
+  org_customer_id: number
+  is_active: boolean
+  created_at: string
+  updated_at: string
+  created_by: string | null
+}
+
+// Append-only audit of what the onboarding wizard provisioned in Workyard.
+export interface PayrollWorkyardProvisionLog {
+  id: string
+  property_code: string
+  workyard_project_id: string | null
+  workyard_cost_code_id: string | null
+  project_action: string
+  cost_code_action: string
+  created_by: string | null
+  created_at: string
+}
