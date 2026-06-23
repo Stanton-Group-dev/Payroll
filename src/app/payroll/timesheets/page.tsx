@@ -49,7 +49,7 @@ function TimesheetsPageContent() {
 
   const {
     allEntries, unallocatedEntries, pendingEntries, corrections,
-    loading, reassign, addEntry, spread, removeEntry, setPending,
+    loading, reassign, addEntry, spread, removeEntry, reduceHours, setPending,
     resolvePending, addCarryForward, refetch,
   } = useTimesheetAdjustments(selectedWeekId || null)
 
@@ -309,6 +309,7 @@ function TimesheetsPageContent() {
                             reassign={reassign}
                             spread={spread}
                             removeEntry={removeEntry}
+                            reduceHours={reduceHours}
                             setPending={setPending}
                             resolvePending={resolvePending}
                             onDone={handleDone}

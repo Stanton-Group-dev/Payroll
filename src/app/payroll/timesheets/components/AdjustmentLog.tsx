@@ -74,6 +74,7 @@ export function AdjustmentLog({ corrections, manualEntries, employees, defaultEm
               <option value="reassign">Reassign</option>
               <option value="split">Split</option>
               <option value="add">Add</option>
+              <option value="reduce">Reduce</option>
               <option value="remove">Remove</option>
             </FormSelect>
             <input
@@ -146,6 +147,7 @@ export function AdjustmentLog({ corrections, manualEntries, employees, defaultEm
                   const correctorLabel = corrector?.full_name ?? corrector?.email?.split('@')[0] ?? '—'
                   const opColor =
                     c.operation === 'remove' ? 'bg-[var(--error)]/10 text-[var(--error)]' :
+                    c.operation === 'reduce' ? 'bg-[var(--warning)]/10 text-[var(--warning)]' :
                     c.operation === 'add'    ? 'bg-[var(--success)]/10 text-[var(--success)]' :
                                                'bg-[var(--primary)]/10 text-[var(--primary)]'
                   return (

@@ -323,6 +323,46 @@ export function useTimesheetAdjustments(weekId: string | null) {
     await refetch()
   }, [allEntries, refetch])
 
+  const reduceHours = useCallback(async (entryId: string, hoursToRemove: number, reason: string) => {
+    const supabase = createClient()
+    const userId = (await supabase.auth.getUser()).data.user?.id ?? null
+    const entry = allEntries.find(e => e.id === entryId)
+    if (!entry) throw new Error('Entry not found')
+
+    const worked = (entry.regular_hours ?? 0) + (entry.ot_hours ?? 0)
+    if (!(hoursToRemove > 0)) throw new Error('Enter a number of hours to remove (> 0)')
+    if (hoursToRemove >= worked - 0.001) {
+      throw new Error(`Removing ${hoursToRemove}h would empty the ${worked}h entry — use Remove for the whole entry`)
+    }
+
+    // Keep the remaining hours as regular and let the pay engine recompute OT from
+    // the weekly total (same convention as Split/Spread, which carry ot_hours: 0).
+    const remaining = parseFloat((worked - hoursToRemove).toFixed(2))
+    const { error: updErr } = await supabase
+      .from('payroll_time_entries')
+      .update({ regular_hours: remaining, ot_hours: 0 })
+      .eq('id', entryId)
+    if (updErr) throw new Error(updErr.message)
+
+    // Audit row records the hours removed. Skip if the entry has no property to
+    // reference (corrections.to_property_id is non-null); mirrors removeEntry.
+    if (entry.property_id) {
+      const { error: corrReduceErr } = await supabase.from('payroll_timesheet_corrections').insert({
+        time_entry_id: entryId,
+        from_property_id: entry.property_id,
+        to_property_id: entry.property_id,
+        hours: hoursToRemove,
+        reason,
+        operation: 'reduce',
+        corrected_by: userId,
+        corrected_at: new Date().toISOString(),
+      })
+      if (corrReduceErr) console.error('payroll_timesheet_corrections insert (reduce)', corrReduceErr)
+    }
+
+    await refetch()
+  }, [allEntries, refetch])
+
   const setPending = useCallback(async (entryId: string, note: string) => {
     const supabase = createClient()
     const { error: err } = await supabase
@@ -382,6 +422,7 @@ export function useTimesheetAdjustments(weekId: string | null) {
     addEntry,
     spread,
     removeEntry,
+    reduceHours,
     setPending,
     resolvePending,
     addCarryForward,
