@@ -10,6 +10,7 @@ import { usePayrollEmployees } from '@/hooks/payroll/usePayrollEmployees'
 import { useProperties } from '@/hooks/payroll/useProperties'
 import { usePortfolios } from '@/hooks/payroll/usePortfolios'
 import { useTimesheetAdjustments } from '@/hooks/payroll/useTimesheetAdjustments'
+import { useWorkyardReconciliation } from '@/hooks/payroll/useWorkyardReconciliation'
 import { PageHeader, FormSelect, FormField, FormButton } from '@/components/form'
 import { EmployeeSwitcher } from './components/EmployeeSwitcher'
 import { WeekGrid } from './components/WeekGrid'
@@ -56,6 +57,30 @@ function TimesheetsPageContent() {
   const { employees } = usePayrollEmployees(false)
   const { properties } = useProperties(true)
   const { portfolios, allProperties } = usePortfolios()
+
+  // Live Workyard reconciliation: flag employees whose recorded hours fall SHORT of
+  // the Workyard source total for the week (the guardrail the import drop-bug slipped
+  // past). Over-hours aren't flagged — manual adds / carry-forwards legitimately
+  // exceed Workyard. Fails soft when Workyard is unreachable.
+  const { hoursByWorkyardId, available: reconAvailable } = useWorkyardReconciliation(
+    weeks.find(w => w.id === selectedWeekId)?.week_start ?? null
+  )
+  const SHORT_THRESHOLD = 0.05
+  const shortByEmployee = useMemo(() => {
+    const m = new Map<string, { expected: number; recorded: number; short: number }>()
+    if (!reconAvailable) return m
+    for (const emp of employees) {
+      if (!emp.workyard_id) continue
+      const expected = hoursByWorkyardId.get(emp.workyard_id)
+      if (expected == null) continue
+      const recorded = allEntries
+        .filter(e => e.employee_id === emp.id)
+        .reduce((s, e) => s + e.regular_hours + e.ot_hours, 0)
+      const short = Math.round((expected - recorded) * 100) / 100
+      if (short > SHORT_THRESHOLD) m.set(emp.id, { expected, recorded, short })
+    }
+    return m
+  }, [reconAvailable, employees, hoursByWorkyardId, allEntries])
 
   const activeWeeks = weeks.filter(w => !['statement_sent'].includes(w.status))
   const approvedWeeks = weeks.filter(w => ['payroll_approved', 'invoiced', 'statement_sent'].includes(w.status))
@@ -195,6 +220,12 @@ function TimesheetsPageContent() {
                 {totalPending} pending
               </span>
             )}
+            {shortByEmployee.size > 0 && (
+              <span className="flex items-center gap-1.5 text-[var(--error)] font-medium">
+                <AlertTriangle size={13} />
+                {shortByEmployee.size} short vs Workyard
+              </span>
+            )}
             {totalUnallocated === 0 && totalPending === 0 && (
               <span className="flex items-center gap-1.5 text-[var(--success)]">
                 <CheckCircle2 size={13} />
@@ -233,6 +264,7 @@ function TimesheetsPageContent() {
             allEntries={allEntries}
             selectedId={selectedEmployeeId}
             onChange={setSelectedEmployeeId}
+            shortIds={new Set(shortByEmployee.keys())}
           />
 
           {/* Main content */}
@@ -277,6 +309,15 @@ function TimesheetsPageContent() {
                     {empUnresolved.length === 0 && empPending.length === 0 && (
                       <span className="text-[var(--success)] flex items-center gap-1">
                         <CheckCircle2 size={13} /> Clean
+                      </span>
+                    )}
+                    {selectedEmployeeId && shortByEmployee.has(selectedEmployeeId) && (
+                      <span className="text-[var(--error)] font-medium flex items-center gap-1">
+                        <AlertTriangle size={13} />
+                        {shortByEmployee.get(selectedEmployeeId)!.short.toFixed(2)}h short vs Workyard
+                        <span className="text-[var(--muted)] font-normal">
+                          (Workyard {shortByEmployee.get(selectedEmployeeId)!.expected.toFixed(2)} · recorded {shortByEmployee.get(selectedEmployeeId)!.recorded.toFixed(2)})
+                        </span>
                       </span>
                     )}
                   </div>
