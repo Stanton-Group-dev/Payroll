@@ -4,10 +4,9 @@
 -- CHECK to include the new value. Without it the correction insert silently fails
 -- (swallowed error) and the reason/audit record would be lost.
 --
--- STAGED — NOT yet applied to the shared prod DB (wkwmxxlfheywwbgdbzxe).
--- Until applied, the 'reduce' correction insert fails the CHECK and is swallowed
--- (console.error), so a partial cut still reduces the hours but writes no audit
--- row. Apply via the Supabase MCP before relying on the reduce audit trail.
+-- APPLIED to the shared prod DB (wkwmxxlfheywwbgdbzxe) via the Supabase MCP
+-- on 2026-06-23. The 'reduce' correction now passes the CHECK, so partial cuts
+-- record their audit row (who/when/why) like every other adjustment.
 
 alter table public.payroll_timesheet_corrections
   drop constraint if exists payroll_timesheet_corrections_operation_check;
