@@ -481,6 +481,8 @@ export interface PayrollGlobalConfig {
   phone_reimbursement_amount: number
   /** Weekly hours threshold above which OT-eligible employees earn overtime (default 40). Editable in Admin → Settings. */
   ot_threshold_hours: number
+  /** Master switch for the automated daily unallocated-hours SMS job. Off by default. */
+  unallocated_notifications_enabled: boolean | null
   created_at: string
   updated_at: string
   created_by: string | null

@@ -4,14 +4,16 @@ import { useState, useEffect } from 'react'
 import { Plus, Check } from 'lucide-react'
 import { useAdminMgmtFee } from '@/hooks/payroll/useAdminMgmtFee'
 import { useAdminGlobalConfig } from '@/hooks/payroll/useAdminGlobalConfig'
-import { PageHeader, FormButton, FormField, FormInput, FormSelect, InfoBlock, SectionDivider } from '@/components/form'
+import { useAuth } from '@/hooks/payroll/useAuth'
+import { PageHeader, FormButton, FormField, FormInput, FormSelect, InfoBlock, SectionDivider, Toggle } from '@/components/form'
 import { format } from 'date-fns'
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 
 export default function MgmtFeePage() {
   const { configs, portfolios, loading, addRate } = useAdminMgmtFee()
-  const { config: globalConfig, properties, users, loading: gcLoading, saveCutoff, savePrefundToggle, saveRateSettings, setPropertyApprover } = useAdminGlobalConfig()
+  const { config: globalConfig, properties, users, loading: gcLoading, saveCutoff, savePrefundToggle, saveRateSettings, saveNotificationsEnabled, setPropertyApprover } = useAdminGlobalConfig()
+  const { isAdmin } = useAuth()
 
   // Mgmt fee form
   const [showForm, setShowForm] = useState(false)
@@ -44,7 +46,12 @@ export default function MgmtFeePage() {
   // Approver filter
   const [approverFilter, setApproverFilter] = useState('')
 
-  // Initialise cutoff form, prefund toggle, and rate settings from loaded config
+  // Automated unallocated-hours notification switch
+  const [notifOn, setNotifOn] = useState(false)
+  const [notifSaving, setNotifSaving] = useState(false)
+  const [notifError, setNotifError] = useState<string | null>(null)
+
+  // Initialise cutoff form, prefund toggle, rate settings, and notification switch from loaded config
   useEffect(() => {
     if (globalConfig) {
       setCutoffDay(String(globalConfig.expense_cutoff_day ?? 3))
@@ -54,8 +61,23 @@ export default function MgmtFeePage() {
       setWorkersCompRate(String(Number((globalConfig.workers_comp_rate ?? 0.03) * 100).toFixed(2)).replace(/\.?0+$/, ''))
       setPhoneAmount(String(globalConfig.phone_reimbursement_amount ?? 8))
       setOtThresholdHours(String(globalConfig.ot_threshold_hours ?? 40))
+      setNotifOn(globalConfig.unallocated_notifications_enabled ?? false)
     }
   }, [globalConfig])
+
+  const handleToggleNotif = async (next: boolean) => {
+    setNotifOn(next) // optimistic
+    setNotifError(null)
+    setNotifSaving(true)
+    try {
+      await saveNotificationsEnabled(next)
+    } catch (e: unknown) {
+      setNotifOn(!next) // roll back
+      setNotifError(e instanceof Error ? e.message : 'Save failed')
+    } finally {
+      setNotifSaving(false)
+    }
+  }
 
   const handleSave = async () => {
     const rate = parseFloat(form.rate_pct)
@@ -367,6 +389,37 @@ export default function MgmtFeePage() {
           )}
           {ratesError && <InfoBlock variant="error">{ratesError}</InfoBlock>}
         </div>
+
+        {/* ── Automated Unallocated-Hours Notifications ─────────────────── */}
+        {isAdmin && (
+          <div className="mt-10">
+            <SectionDivider label="Automated Unallocated-Hours Notifications" />
+            <InfoBlock variant="warning" title="Off by default — turn on only when you're ready to text employees">
+              When <strong>on</strong>, a daily job texts each employee who has hours not yet assigned
+              to a property in Workyard, telling them to open Workyard and assign them (unassigned
+              hours can&apos;t be paid). When <strong>off</strong>, nothing automated is sent — managers
+              can still hold &amp; notify by hand from the weekly review screen. Texts stay in dry-run
+              (logged, not delivered) until Twilio credentials are configured.
+            </InfoBlock>
+            {gcLoading ? (
+              <div className="text-sm text-[var(--muted)] py-4">Loading…</div>
+            ) : (
+              <div className="flex items-center gap-3 mt-4">
+                <Toggle
+                  on={notifOn}
+                  disabled={notifSaving}
+                  onChange={handleToggleNotif}
+                  label="Enable automated unallocated-hours notifications"
+                />
+                <span className="text-sm text-[var(--ink)]">
+                  {notifOn ? 'On — daily texts will be sent' : 'Off — no automated texts'}
+                </span>
+                {notifSaving && <span className="text-xs text-[var(--muted)]">Saving…</span>}
+              </div>
+            )}
+            {notifError && <InfoBlock variant="error">{notifError}</InfoBlock>}
+          </div>
+        )}
 
         {/* ── Property Expense Approvers ────────────────────────────────── */}
         <div className="mt-10 mb-8">
