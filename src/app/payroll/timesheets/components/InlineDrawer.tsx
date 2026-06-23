@@ -315,6 +315,7 @@ interface InlineDrawerProps {
     propertyIds: string[]; portfolioId?: string; reason: string; sourceEntryId?: string
   }) => Promise<void>
   removeEntry: (entryId: string, reason: string) => Promise<void>
+  reduceHours: (entryId: string, hoursToRemove: number, reason: string) => Promise<void>
   setPending: (entryId: string, note: string) => Promise<void>
   resolvePending: (entryId: string) => Promise<void>
   onDone: () => void
@@ -323,7 +324,7 @@ interface InlineDrawerProps {
 
 export function InlineDrawer({
   cell, properties, portfolios, allProperties, isLocked,
-  onClose, reassign, spread, removeEntry, setPending, resolvePending, onDone, onDirtyChange,
+  onClose, reassign, spread, removeEntry, reduceHours, setPending, resolvePending, onDone, onDirtyChange,
 }: InlineDrawerProps) {
   const isUnallocated = cell.rowPropertyId === null
   const primaryEntry = cell.entries[0]
@@ -369,6 +370,10 @@ export function InlineDrawer({
   // Remove form
   const [removeReason, setRemoveReason] = useState('')
 
+  // Reduce form — cut some worked hours off the entry, keep the rest
+  const [reduceAmount, setReduceAmount] = useState('')
+  const [reduceReason, setReduceReason] = useState('')
+
   // Whether the user has any in-progress input that would be lost on close.
   // Reported up so the page can prompt before switching to another cell.
   const pendingNoteBaseline = primaryEntry?.pending_note ?? ''
@@ -387,7 +392,9 @@ export function InlineDrawer({
     spreadReason.trim() !== '' ||
     spreadAmount !== spreadAmountBaseline ||
     pendingNote !== pendingNoteBaseline ||
-    removeReason.trim() !== ''
+    removeReason.trim() !== '' ||
+    reduceAmount !== '' ||
+    reduceReason.trim() !== ''
 
   useEffect(() => {
     onDirtyChange(isDirty)
@@ -719,6 +726,55 @@ export function InlineDrawer({
                       Reassign {entryHours}h →
                     </FormButton>
                   </div>
+                </div>
+                <div className="space-y-2 pt-2 border-t border-[var(--divider)]">
+                  <p className="text-xs font-medium text-[var(--ink)]">Reduce hours</p>
+                  <p className="text-xs text-[var(--muted)]">Cut some of the {entryHours}h off this entry (e.g. over-reported time) and keep the rest. To remove the whole entry, use Remove below.</p>
+                  {(() => {
+                    const reduceVal = parseFloat(reduceAmount) || 0
+                    const newTotal = parseFloat((entryHours - reduceVal).toFixed(2))
+                    const reduceValid = reduceVal > 0 && reduceVal < entryHours
+                    return (
+                      <>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <label className="flex items-center gap-2 text-xs text-[var(--muted)]">
+                            <span>Remove</span>
+                            <div className="w-20">
+                              <FormInput type="number" step="0.25" min="0" max={entryHours}
+                                value={reduceAmount} onChange={e => setReduceAmount(e.target.value)} placeholder="hrs" />
+                            </div>
+                            <span>hours</span>
+                          </label>
+                          {reduceVal > 0 && (
+                            reduceValid
+                              ? <span className="text-xs text-[var(--muted)]">new total: <span className="font-medium text-[var(--ink)]">{newTotal}h</span></span>
+                              : <span className="text-xs text-[var(--error)]">must be more than 0 and less than {entryHours}h</span>
+                          )}
+                        </div>
+                        <FormTextarea value={reduceReason} onChange={e => setReduceReason(e.target.value)}
+                          placeholder="Reason required — e.g. 'Over-reported — only worked 8h'" rows={2} />
+                        <div className="flex gap-2">
+                          <FormButton size="sm"
+                            onClick={async () => {
+                              if (!reduceValid) { setErr(`Enter hours to remove (more than 0, less than ${entryHours})`); return }
+                              if (!reduceReason.trim()) { setErr('Reduction reason required'); return }
+                              setErr(null); setSaving(true)
+                              try {
+                                await reduceHours(primaryEntry.id, reduceVal, reduceReason)
+                                onDone()
+                              } catch (e: unknown) {
+                                setErr(e instanceof Error ? e.message : 'Reduce failed')
+                              } finally { setSaving(false) }
+                            }}
+                            loading={saving}
+                            disabled={!reduceValid || !reduceReason.trim()}>
+                            Remove {reduceVal > 0 ? reduceVal : '—'}h
+                          </FormButton>
+                          <FormButton size="sm" variant="ghost" onClick={onClose}>Cancel</FormButton>
+                        </div>
+                      </>
+                    )
+                  })()}
                 </div>
                 <div className="space-y-2 pt-2 border-t border-[var(--divider)]">
                   <p className="text-xs text-[var(--error)]">Remove this entry — it will be deactivated. Cannot be undone without a manual re-add.</p>
