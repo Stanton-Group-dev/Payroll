@@ -131,10 +131,13 @@ function TimesheetsPageContent() {
 
   // Per-employee stats for header
   const selectedEmployee = employees.find(e => e.id === selectedEmployeeId) as PayrollEmployee | undefined
-  const empUnresolved = employeeEntries.filter(e => !e.property_id && !e.pending_resolution)
+  // An unresolved block is unallocated *work* — a pure PTO entry has no property by
+  // design and must not masquerade as something needing a building.
+  const empUnresolved = employeeEntries.filter(e => !e.property_id && !e.pending_resolution && (e.regular_hours + e.ot_hours) > 0)
   const empPending = employeeEntries.filter(e => e.pending_resolution)
   const empTotalHours = employeeEntries.reduce((s, e) => s + e.regular_hours + e.ot_hours, 0)
   const empPendingHours = empPending.reduce((s, e) => s + e.regular_hours + e.ot_hours, 0)
+  const empPtoHours = employeeEntries.reduce((s, e) => s + (e.pto_hours ?? 0), 0)
 
   // Week-wide summary
   const totalUnallocated = unallocatedEntries.length
@@ -310,6 +313,11 @@ function TimesheetsPageContent() {
                       <span className="text-blue-600 flex items-center gap-1">
                         <Clock size={13} />
                         {empPendingHours.toFixed(1)} hrs pending
+                      </span>
+                    )}
+                    {empPtoHours > 0 && (
+                      <span className="text-[var(--muted)] flex items-center gap-1">
+                        {empPtoHours.toFixed(2)} hrs PTO
                       </span>
                     )}
                     {empUnresolved.length === 0 && empPending.length === 0 && (

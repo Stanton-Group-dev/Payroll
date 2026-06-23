@@ -452,4 +452,5 @@ Each allocation becomes a separate `WorkyardRow` and ultimately a separate `payr
 - The `WORKYARD_API_KEY` and `WORKYARD_ORG_ID` env vars are server-side only (not `NEXT_PUBLIC_`).
 - The payroll system proxy route is at `/api/workyard/timecards?weekStart=YYYY-MM-DD`.
 - Only `status=eq:approved` cards are imported — cards in `working/submitted` stay in Workyard.
-- PTO hours are not available directly from the time cards API — set to 0 and correct in the payroll system if needed.
+- PTO hours are not available directly from the time cards API — the API import path sets `pto_hours: 0`. PTO can still enter via CSV import (the export carries PTO columns) or a manual entry (pay-type `pto`), and the pay engine handles it.
+  - A separate endpoint **exists** for capture: `GET /orgs/{org}/time_off_requests` (returns `{data, meta, links}`, paginated like other list endpoints; `status=eq:approved` filter works). As of 2026-06-23 it returns **empty** for org 25316, so the record schema is unverified — wire capture into `fetchWorkyardTimecards` once a real request exists to read field names against. Until then PTO is shown but not auto-pulled.

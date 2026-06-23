@@ -81,8 +81,10 @@ export function useTimesheetAdjustments(weekId: string | null) {
 
   useEffect(() => { refetch() }, [refetch])
 
-  // Derived: unallocated = active entries with no property_id
-  const unallocatedEntries = allEntries.filter(e => !e.property_id)
+  // Derived: unallocated = active *work* entries with no property_id. A pure PTO
+  // entry legitimately has no property and must not count as needing allocation
+  // (it would otherwise block timesheet approval and inflate the unresolved count).
+  const unallocatedEntries = allEntries.filter(e => !e.property_id && (e.regular_hours + e.ot_hours) > 0)
 
   // Derived: pending entries
   const pendingEntries = allEntries.filter(e => e.pending_resolution)

@@ -25,7 +25,9 @@ interface EmployeeInfo {
 
 function getEmployeeInfo(emp: PayrollEmployee, entries: PayrollTimeEntry[], isShort: boolean): EmployeeInfo {
   const empEntries = entries.filter(e => e.employee_id === emp.id)
-  const unresolvedCount = empEntries.filter(e => !e.property_id && !e.pending_resolution).length
+  // Unallocated *work* only — a pure PTO entry has no property by design (matches
+  // the unresolved-block definition on the timesheet page).
+  const unresolvedCount = empEntries.filter(e => !e.property_id && !e.pending_resolution && (e.regular_hours + e.ot_hours) > 0).length
   const pendingCount = empEntries.filter(e => e.pending_resolution).length
   const status: Status = unresolvedCount > 0 ? 'unresolved' : pendingCount > 0 ? 'pending' : 'clean'
   return { employee: emp, status, unresolvedCount, pendingCount, isShort }
