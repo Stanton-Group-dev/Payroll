@@ -1,9 +1,10 @@
 'use client'
 
-import { use } from 'react'
+import { use, useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { ArrowLeft, ClipboardList, SlidersHorizontal, GitBranch } from 'lucide-react'
+import { useSelectedWeek } from '@/hooks/payroll/useSelectedWeek'
 
 const weekTabs = [
   { href: 'review', label: 'Payroll Review' },
@@ -22,6 +23,13 @@ export default function WeekLayout({
 }) {
   const { weekId } = use(params)
   const pathname = usePathname()
+  const { setSelectedWeekId } = useSelectedWeek()
+
+  // Keep the sidebar's "selected week" in sync with the week being viewed so the
+  // close-out pipeline links (Review → ADP Reconciliation) point at this week.
+  useEffect(() => {
+    if (weekId) setSelectedWeekId(weekId)
+  }, [weekId, setSelectedWeekId])
 
   return (
     <div className="flex flex-col h-full">
