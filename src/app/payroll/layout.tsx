@@ -36,6 +36,7 @@ import {
   TrendingUp,
   LayoutDashboard,
   Wand2,
+  ClipboardList,
   type LucideIcon,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/payroll/useAuth'
@@ -82,6 +83,7 @@ const insightsItems: Item[] = [
 ]
 const settingsItems: Item[] = [
   { href: '/payroll/admin/onboard', label: 'New Project', icon: Wand2 },
+  { href: '/payroll/admin/onboarding', label: 'Employee Onboarding', icon: ClipboardList },
   { href: '/payroll/admin/mgmt-fee', label: 'Management Fee', icon: Settings },
   { href: '/payroll/admin/portfolios', label: 'Portfolios', icon: Briefcase },
   { href: '/payroll/admin/invoicing', label: 'Billed Properties', icon: SlidersHorizontal },
