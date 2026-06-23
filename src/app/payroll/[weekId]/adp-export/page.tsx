@@ -5,11 +5,18 @@ import { use } from 'react'
 import { Download, Lock } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { PageHeader, FormButton, InfoBlock } from '@/components/form'
-import { formatCurrency } from '@/lib/payroll/calculations'
+import { calculatePayroll, resolveRateAsOf, formatCurrency } from '@/lib/payroll/calculations'
+import {
+  curatedToProperty,
+  CURATED_PROPERTY_COLUMNS,
+  type CuratedPropertyRow,
+} from '@/lib/payroll/properties'
 import type { PayrollWeek } from '@/lib/supabase/types'
 
 interface ADPRow {
   employee_name: string
+  // Raw hours as reported by the engine — ADP applies the 1.5x OT premium itself.
+  // Do NOT inflate OT hours by 1.5x here.
   regular_hours: number
   ot_hours: number
   pto_hours: number
@@ -30,64 +37,74 @@ export default function ADPExportPage({ params }: { params: Promise<{ weekId: st
     const load = async () => {
       setLoading(true)
       const supabase = createClient()
-      const [weekRes, empRes, entRes, adjRes, approvalRes] = await Promise.all([
+      const [weekRes, empRes, entRes, adjRes, approvalRes, feeRes, propRes, ratesRes, mileageRes] = await Promise.all([
         supabase.from('payroll_weeks').select('*').eq('id', weekId).single(),
         supabase.from('payroll_employees').select('*').eq('is_active', true),
         supabase.from('payroll_time_entries').select('*').eq('payroll_week_id', weekId).eq('is_flagged', false),
         supabase.from('payroll_adjustments').select('*').eq('payroll_week_id', weekId),
         supabase.from('payroll_approvals').select('*').eq('payroll_week_id', weekId).eq('stage', 'statement'),
+        supabase.from('payroll_management_fee_config').select('*').order('effective_date', { ascending: false }),
+        supabase.from('payroll_property').select(CURATED_PROPERTY_COLUMNS).eq('is_active', true),
+        supabase.from('payroll_employee_rates').select('*'),
+        supabase.from('payroll_mileage_reimbursements').select('*').eq('payroll_week_id', weekId),
       ])
       setWeek(weekRes.data)
       setStatementApproved((approvalRes.data?.length ?? 0) > 0)
 
-      const employees = empRes.data ?? []
-      const entries = entRes.data ?? []
-      const adjustments = adjRes.data ?? []
+      const weekStart = weekRes.data?.week_start as string
+      const employeeRates = ratesRes.data ?? []
 
-      const empMap: Record<string, typeof employees[0]> = {}
-      for (const e of employees) empMap[e.id] = e
+      // Pre-resolve effective-dated rates for each employee, exactly as the review hook does.
+      const employees = (empRes.data ?? []).map(e => ({
+        ...e,
+        hourly_rate: resolveRateAsOf(e.id, weekStart, employeeRates, e.hourly_rate ?? 0),
+      }))
 
-      const summary: Record<string, ADPRow> = {}
-      for (const e of employees) {
-        summary[e.id] = {
-          employee_name: e.name,
-          regular_hours: 0, ot_hours: 0, pto_hours: 0,
-          gross_pay: e.type === 'salaried' ? (Number(e.weekly_rate) || 0) : 0,
-          adjustments: 0, advances: 0, net_pay: 0,
-        }
-      }
+      const properties = (propRes.data ?? []).map(r => curatedToProperty(r as unknown as CuratedPropertyRow))
 
-      for (const entry of entries) {
-        const emp = empMap[entry.employee_id]
-        if (!emp || !summary[entry.employee_id]) continue
-        summary[entry.employee_id].regular_hours += entry.regular_hours ?? 0
-        summary[entry.employee_id].ot_hours += entry.ot_hours ?? 0
-        summary[entry.employee_id].pto_hours += entry.pto_hours ?? 0
-        if (emp.type !== 'salaried') {
-          const rate = emp.hourly_rate ?? 0
-          summary[entry.employee_id].gross_pay += ((entry.regular_hours ?? 0) + (entry.ot_hours ?? 0)) * rate
-        }
-      }
+      // Delegate all gross/hours computation to the single engine.
+      const result = calculatePayroll(
+        employees,
+        entRes.data ?? [],
+        adjRes.data ?? [],
+        feeRes.data ?? [],
+        properties,
+        mileageRes.data ?? [],
+        {},         // no dept splits needed for export
+        weekStart,
+      )
 
-      for (const adj of adjustments) {
-        if (!summary[adj.employee_id]) continue
+      // Build a lookup of per-employee adjustments and advances for display columns.
+      const adjByEmp: Record<string, { adjustments: number; advances: number }> = {}
+      for (const adj of (adjRes.data ?? [])) {
+        if (!adjByEmp[adj.employee_id]) adjByEmp[adj.employee_id] = { adjustments: 0, advances: 0 }
         if (adj.type === 'advance' || adj.type === 'deduction_other') {
-          summary[adj.employee_id].advances += Math.abs(adj.amount)
+          adjByEmp[adj.employee_id].advances += Math.abs(adj.amount)
         } else {
-          summary[adj.employee_id].adjustments += adj.amount
-          summary[adj.employee_id].gross_pay += adj.amount
+          adjByEmp[adj.employee_id].adjustments += adj.amount
         }
       }
 
-      for (const row of Object.values(summary)) {
-        row.net_pay = row.gross_pay - row.advances
-        row.regular_hours = Math.round(row.regular_hours * 100) / 100
-        row.ot_hours = Math.round(row.ot_hours * 100) / 100
-        row.gross_pay = Math.round(row.gross_pay * 100) / 100
-        row.net_pay = Math.round(row.net_pay * 100) / 100
-      }
+      // Map engine summaries to ADP rows.
+      // CRITICAL: use engine's raw regular_hours / ot_hours — ADP applies the 1.5x
+      // premium itself, so we must not feed premium-inflated wages as hours here.
+      const adpRows: ADPRow[] = result.employee_summaries
+        .filter(s => s.gross_pay > 0 || s.regular_hours > 0)
+        .map(s => {
+          const adj = adjByEmp[s.employee_id] ?? { adjustments: 0, advances: 0 }
+          return {
+            employee_name: s.employee_name,
+            regular_hours: s.regular_hours,
+            ot_hours: s.ot_hours,
+            pto_hours: s.pto_hours,
+            gross_pay: s.gross_pay,
+            adjustments: adj.adjustments,
+            advances: adj.advances,
+            net_pay: Math.round((s.gross_pay - adj.advances) * 100) / 100,
+          }
+        })
 
-      setRows(Object.values(summary).filter(r => r.gross_pay > 0 || r.regular_hours > 0))
+      setRows(adpRows)
       setLoading(false)
     }
     load()

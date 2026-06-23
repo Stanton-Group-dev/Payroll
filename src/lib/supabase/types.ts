@@ -472,6 +472,15 @@ export interface PayrollGlobalConfig {
   id: string
   expense_cutoff_day: number | null
   expense_cutoff_time: string | null
+  prefund_includes_mgmt_fee: boolean
+  /** Employer FICA/SUTA burden rate (default 0.08). Editable in Admin → Settings. */
+  payroll_tax_rate: number
+  /** Workers-compensation rate (default 0.03). Editable in Admin → Settings. */
+  workers_comp_rate: number
+  /** Weekly phone-reimbursement amount per eligible employee, USD (default 8). Editable in Admin → Settings. */
+  phone_reimbursement_amount: number
+  /** Weekly hours threshold above which OT-eligible employees earn overtime (default 40). Editable in Admin → Settings. */
+  ot_threshold_hours: number
   created_at: string
   updated_at: string
   created_by: string | null

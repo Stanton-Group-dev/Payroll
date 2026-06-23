@@ -2,6 +2,56 @@ import type { WorkyardRow } from '@/lib/payroll/csv-parser'
 import { WORKYARD_ORG_TIMEZONE } from '@/lib/payroll/config'
 import { isWorkyardMockEnabled, generateMockTimecards } from '@/lib/payroll/workyard-mock'
 
+/**
+ * Splits `totalHours` across N legs proportionally to `weights`, returning one
+ * 2-decimal-place value per leg such that the array sum equals round2(totalHours)
+ * exactly (largest-remainder method).
+ *
+ * Edge cases:
+ * - totalHours === 0  → all zeros.
+ * - all weights === 0 → equal split (1/N each).
+ * - single weight     → [round2(totalHours)].
+ */
+export function splitHoursLargestRemainder(totalHours: number, weights: number[]): number[] {
+  if (weights.length === 0) return []
+  const round2 = (n: number) => Math.round(n * 100) / 100
+  const canonical = round2(totalHours)
+
+  if (canonical === 0) return weights.map(() => 0)
+
+  const totalWeight = weights.reduce((s, w) => s + w, 0)
+
+  // Compute raw (unrounded) share per leg.
+  const raws = weights.map(w =>
+    totalWeight > 0 ? (canonical * w) / totalWeight : canonical / weights.length
+  )
+
+  // Floor each to 2 dp (in integer cents to avoid fp drift).
+  const floored = raws.map(r => Math.floor(Math.round(r * 10000) / 100) / 100)
+
+  // Residue to distribute (in cents to keep it integer arithmetic).
+  const flooredSumCents = floored.reduce((s, v) => s + Math.round(v * 100), 0)
+  const canonicalCents = Math.round(canonical * 100)
+  let residueCents = canonicalCents - flooredSumCents
+
+  if (residueCents > 0) {
+    // Fractional remainders (after flooring) in descending order.
+    const remainders = raws.map((r, i) => ({
+      i,
+      frac: Math.round(r * 10000) / 100 - Math.floor(Math.round(r * 10000) / 100),
+    }))
+    // Sort descending by fraction; ties broken by ascending index.
+    remainders.sort((a, b) => b.frac - a.frac || a.i - b.i)
+
+    for (let k = 0; k < residueCents; k++) {
+      floored[remainders[k % remainders.length].i] =
+        Math.round((floored[remainders[k % remainders.length].i] + 0.01) * 100) / 100
+    }
+  }
+
+  return floored
+}
+
 const BASE_URL = 'https://api.workyard.com'
 const API_KEY = process.env.WORKYARD_API_KEY!
 const ORG_ID = process.env.WORKYARD_ORG_ID!
@@ -338,10 +388,14 @@ export async function fetchWorkyardTimecards(
       continue
     }
 
-    const totalAllocSecs = allocations.reduce((sum, a) => sum + (a.duration_secs ?? 0), 0)
+    const weights = allocations.map(a => a.duration_secs ?? 0)
+    const regHours = totalRegSecs / 3600
+    const otHours = (totalOtSecs + totalDtSecs) / 3600
+    const regSplit = splitHoursLargestRemainder(regHours, weights)
+    const otSplit = splitHoursLargestRemainder(otHours, weights)
 
-    for (const alloc of allocations) {
-      const proportion = totalAllocSecs > 0 ? (alloc.duration_secs ?? 0) / totalAllocSecs : 1 / allocations.length
+    for (let i = 0; i < allocations.length; i++) {
+      const alloc = allocations[i]
       const proj = alloc.org_project_id ? projectMap.get(alloc.org_project_id) : null
 
       rows.push({
@@ -355,8 +409,8 @@ export async function fetchWorkyardTimecards(
           proj?.sCode ?? alloc.geofence?.name ?? '',
         customerName: proj?.customerName ?? '',
         entryDate,
-        regularHours: Math.round((totalRegSecs * proportion / 3600) * 100) / 100,
-        otHours: Math.round(((totalOtSecs + totalDtSecs) * proportion / 3600) * 100) / 100,
+        regularHours: regSplit[i],
+        otHours: otSplit[i],
         ptoHours: 0,
         timecardId,
         // costCode keeps the NAME here (unchanged activity behavior); the CSV path supplies

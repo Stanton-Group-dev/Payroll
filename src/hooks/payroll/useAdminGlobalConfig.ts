@@ -106,6 +106,54 @@ export function useAdminGlobalConfig() {
     await load()
   }, [config, load])
 
+  const savePrefundToggle = useCallback(async (prefundIncludesMgmtFee: boolean) => {
+    const supabase = createClient()
+    const userId = (await supabase.auth.getUser()).data.user?.id ?? ''
+    if (config) {
+      const { error: err } = await supabase
+        .from('payroll_global_config')
+        .update({ prefund_includes_mgmt_fee: prefundIncludesMgmtFee, created_by: userId })
+        .eq('id', config.id)
+      if (err) throw new Error(err.message)
+    } else {
+      const { error: err } = await supabase
+        .from('payroll_global_config')
+        .insert({ prefund_includes_mgmt_fee: prefundIncludesMgmtFee, created_by: userId })
+      if (err) throw new Error(err.message)
+    }
+    await load()
+  }, [config, load])
+
+  const saveRateSettings = useCallback(async (rates: {
+    payrollTaxRate: number
+    workersCompRate: number
+    phoneAmount: number
+    otThresholdHours: number
+  }) => {
+    const supabase = createClient()
+    const userId = (await supabase.auth.getUser()).data.user?.id ?? ''
+    const patch = {
+      payroll_tax_rate: rates.payrollTaxRate,
+      workers_comp_rate: rates.workersCompRate,
+      phone_reimbursement_amount: rates.phoneAmount,
+      ot_threshold_hours: rates.otThresholdHours,
+      created_by: userId,
+    }
+    if (config) {
+      const { error: err } = await supabase
+        .from('payroll_global_config')
+        .update(patch)
+        .eq('id', config.id)
+      if (err) throw new Error(err.message)
+    } else {
+      const { error: err } = await supabase
+        .from('payroll_global_config')
+        .insert(patch)
+      if (err) throw new Error(err.message)
+    }
+    await load()
+  }, [config, load])
+
   const setPropertyApprover = useCallback(async (propertyId: string, userId: string | null) => {
     const supabase = createClient()
     const { error: err } = await supabase
@@ -116,5 +164,5 @@ export function useAdminGlobalConfig() {
     await load()
   }, [load])
 
-  return { config, properties, users, loading, error, refetch: load, saveCutoff, setPropertyApprover }
+  return { config, properties, users, loading, error, refetch: load, saveCutoff, savePrefundToggle, saveRateSettings, setPropertyApprover }
 }

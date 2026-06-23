@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { PayrollTimeEntry, PayrollTimesheetCorrection } from '@/lib/supabase/types'
+import { assertWeekWritable } from '@/lib/payroll/weekLock'
 
 export interface SplitTarget {
   propertyId: string
@@ -97,6 +98,7 @@ export function useTimesheetAdjustments(weekId: string | null) {
     const userId = (await supabase.auth.getUser()).data.user?.id ?? null
     const entry = allEntries.find(e => e.id === entryId)
     if (!entry) throw new Error('Entry not found')
+    await assertWeekWritable(supabase, entry.payroll_week_id)
 
     const totalSplit = splits.reduce((s, t) => s + t.hours, 0)
     const entryTotal = entry.regular_hours + entry.ot_hours
@@ -188,6 +190,7 @@ export function useTimesheetAdjustments(weekId: string | null) {
   }) => {
     const supabase = createClient()
     const userId = (await supabase.auth.getUser()).data.user?.id ?? null
+    await assertWeekWritable(supabase, weekId)
     const pt = params.payType ?? 'regular'
     const { error: err } = await supabase.from('payroll_time_entries').insert({
       payroll_week_id: weekId,
@@ -220,6 +223,7 @@ export function useTimesheetAdjustments(weekId: string | null) {
     if (params.totalHours <= 0) throw new Error('Hours to spread must be greater than 0')
     const supabase = createClient()
     const userId = (await supabase.auth.getUser()).data.user?.id ?? null
+    await assertWeekWritable(supabase, weekId)
 
     // Distribute hours so the per-property legs sum *exactly* to totalHours.
     // Each leg is rounded to the cent; the final leg absorbs any rounding remainder
@@ -298,6 +302,7 @@ export function useTimesheetAdjustments(weekId: string | null) {
     const supabase = createClient()
     const userId = (await supabase.auth.getUser()).data.user?.id ?? null
     const entry = allEntries.find(e => e.id === entryId)
+    await assertWeekWritable(supabase, entry?.payroll_week_id)
 
     const { error: err } = await supabase
       .from('payroll_time_entries')
@@ -325,6 +330,8 @@ export function useTimesheetAdjustments(weekId: string | null) {
 
   const setPending = useCallback(async (entryId: string, note: string) => {
     const supabase = createClient()
+    const entry = allEntries.find(e => e.id === entryId)
+    await assertWeekWritable(supabase, entry?.payroll_week_id)
     const { error: err } = await supabase
       .from('payroll_time_entries')
       .update({
@@ -335,17 +342,19 @@ export function useTimesheetAdjustments(weekId: string | null) {
       .eq('id', entryId)
     if (err) throw new Error(err.message)
     await fetchEntries()
-  }, [fetchEntries])
+  }, [allEntries, fetchEntries])
 
   const resolvePending = useCallback(async (entryId: string) => {
     const supabase = createClient()
+    const entry = allEntries.find(e => e.id === entryId)
+    await assertWeekWritable(supabase, entry?.payroll_week_id)
     const { error: err } = await supabase
       .from('payroll_time_entries')
       .update({ pending_resolution: false, pending_note: null, pending_since: null })
       .eq('id', entryId)
     if (err) throw new Error(err.message)
     await fetchEntries()
-  }, [fetchEntries])
+  }, [allEntries, fetchEntries])
 
   const addCarryForward = useCallback(async (params: {
     employeeId: string

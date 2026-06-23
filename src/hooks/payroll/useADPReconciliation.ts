@@ -2,7 +2,12 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { otMultiplier } from '@/lib/payroll/calculations'
+import { calculatePayroll, resolveRateAsOf } from '@/lib/payroll/calculations'
+import {
+  curatedToProperty,
+  CURATED_PROPERTY_COLUMNS,
+  type CuratedPropertyRow,
+} from '@/lib/payroll/properties'
 import type { PayrollWeek, PayrollADPReconciliation } from '@/lib/supabase/types'
 
 export interface SystemEmployeeRow {
@@ -30,12 +35,16 @@ export function useADPReconciliation(weekId: string) {
     setLoading(true)
     setError(null)
     const supabase = createClient()
-    const [weekRes, reconRes, empRes, entRes, adjRes] = await Promise.all([
+    const [weekRes, reconRes, empRes, entRes, adjRes, feeRes, propRes, ratesRes, mileageRes] = await Promise.all([
       supabase.from('payroll_weeks').select('*').eq('id', weekId).single(),
       supabase.from('payroll_adp_reconciliation').select('*').eq('payroll_week_id', weekId).maybeSingle(),
-      supabase.from('payroll_employees').select('id, name, hourly_rate, weekly_rate, type, department, ot_allowed').eq('is_active', true),
+      supabase.from('payroll_employees').select('*').eq('is_active', true),
       supabase.from('payroll_time_entries').select('*').eq('payroll_week_id', weekId).eq('is_flagged', false),
       supabase.from('payroll_adjustments').select('*').eq('payroll_week_id', weekId).eq('is_active', true),
+      supabase.from('payroll_management_fee_config').select('*').order('effective_date', { ascending: false }),
+      supabase.from('payroll_property').select(CURATED_PROPERTY_COLUMNS).eq('is_active', true),
+      supabase.from('payroll_employee_rates').select('*'),
+      supabase.from('payroll_mileage_reimbursements').select('*').eq('payroll_week_id', weekId),
     ])
     if (weekRes.error) { setError(weekRes.error.message); setLoading(false); return }
     setWeek(weekRes.data)
@@ -59,30 +68,32 @@ export function useADPReconciliation(weekId: string) {
       setExistingRows([])
     }
 
-    const empMap: Record<string, { name: string; hourly_rate: number; weekly_rate: number | null; type: string; department: string | null; ot_allowed: boolean }> = {}
-    for (const e of (empRes.data ?? [])) {
-      empMap[e.id] = { name: e.name, hourly_rate: e.hourly_rate ?? 0, weekly_rate: e.weekly_rate ?? null, type: e.type ?? 'hourly', department: e.department ?? null, ot_allowed: e.ot_allowed ?? true }
-    }
+    const weekStart = weekRes.data.week_start as string
+    const employeeRates = ratesRes.data ?? []
 
-    const empGross: Record<string, number> = {}
-    for (const entry of (entRes.data ?? [])) {
-      const emp = empMap[entry.employee_id]
-      if (!emp) continue
-      if (!empGross[entry.employee_id]) empGross[entry.employee_id] = 0
-      if (emp.type === 'salaried' && emp.weekly_rate) {
-        empGross[entry.employee_id] = emp.weekly_rate
-      } else {
-        empGross[entry.employee_id] += (entry.regular_hours ?? 0) * emp.hourly_rate + (entry.ot_hours ?? 0) * emp.hourly_rate * otMultiplier(emp.type, emp.department, emp.ot_allowed)
-      }
-    }
-    for (const adj of (adjRes.data ?? [])) {
-      if (!empGross[adj.employee_id]) empGross[adj.employee_id] = 0
-      empGross[adj.employee_id] += Number(adj.amount)
-    }
+    // Pre-resolve effective-dated rates for each employee, exactly as the review hook does.
+    const employees = (empRes.data ?? []).map(e => ({
+      ...e,
+      hourly_rate: resolveRateAsOf(e.id, weekStart, employeeRates, e.hourly_rate ?? 0),
+    }))
 
-    const sysEmps: SystemEmployeeRow[] = Object.entries(empGross)
-      .filter(([, g]) => g > 0)
-      .map(([id, g]) => ({ name: empMap[id]?.name ?? id, gross: Math.round(g * 100) / 100 }))
+    const properties = (propRes.data ?? []).map(r => curatedToProperty(r as unknown as CuratedPropertyRow))
+
+    // Delegate gross computation to the single engine — no local loop.
+    const result = calculatePayroll(
+      employees,
+      entRes.data ?? [],
+      adjRes.data ?? [],
+      feeRes.data ?? [],
+      properties,
+      mileageRes.data ?? [],
+      {},        // no dept splits needed for gross
+      weekStart,
+    )
+
+    const sysEmps: SystemEmployeeRow[] = result.employee_summaries
+      .filter(s => s.gross_pay > 0)
+      .map(s => ({ name: s.employee_name, gross: s.gross_pay }))
       .sort((a, b) => a.name.localeCompare(b.name))
 
     setSystemEmployees(sysEmps)

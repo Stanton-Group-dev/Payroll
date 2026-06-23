@@ -11,7 +11,7 @@ const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frid
 
 export default function MgmtFeePage() {
   const { configs, portfolios, loading, addRate } = useAdminMgmtFee()
-  const { config: globalConfig, properties, users, loading: gcLoading, saveCutoff, setPropertyApprover } = useAdminGlobalConfig()
+  const { config: globalConfig, properties, users, loading: gcLoading, saveCutoff, savePrefundToggle, saveRateSettings, setPropertyApprover } = useAdminGlobalConfig()
 
   // Mgmt fee form
   const [showForm, setShowForm] = useState(false)
@@ -26,14 +26,34 @@ export default function MgmtFeePage() {
   const [cutoffSaved, setCutoffSaved] = useState(false)
   const [cutoffError, setCutoffError] = useState<string | null>(null)
 
+  // Prefund toggle
+  const [prefundIncludesMgmtFee, setPrefundIncludesMgmtFee] = useState(true)
+  const [savingPrefund, setSavingPrefund] = useState(false)
+  const [prefundSaved, setPrefundSaved] = useState(false)
+  const [prefundError, setPrefundError] = useState<string | null>(null)
+
+  // Rate settings (payroll tax, workers' comp, phone, OT threshold)
+  const [payrollTaxRate, setPayrollTaxRate] = useState('8')
+  const [workersCompRate, setWorkersCompRate] = useState('3')
+  const [phoneAmount, setPhoneAmount] = useState('8')
+  const [otThresholdHours, setOtThresholdHours] = useState('40')
+  const [savingRates, setSavingRates] = useState(false)
+  const [ratesSaved, setRatesSaved] = useState(false)
+  const [ratesError, setRatesError] = useState<string | null>(null)
+
   // Approver filter
   const [approverFilter, setApproverFilter] = useState('')
 
-  // Initialise cutoff form from loaded config
+  // Initialise cutoff form, prefund toggle, and rate settings from loaded config
   useEffect(() => {
     if (globalConfig) {
       setCutoffDay(String(globalConfig.expense_cutoff_day ?? 3))
       setCutoffTime((globalConfig.expense_cutoff_time ?? '17:00:00').slice(0, 5))
+      setPrefundIncludesMgmtFee(globalConfig.prefund_includes_mgmt_fee ?? true)
+      setPayrollTaxRate(String(Number((globalConfig.payroll_tax_rate ?? 0.08) * 100).toFixed(2)).replace(/\.?0+$/, ''))
+      setWorkersCompRate(String(Number((globalConfig.workers_comp_rate ?? 0.03) * 100).toFixed(2)).replace(/\.?0+$/, ''))
+      setPhoneAmount(String(globalConfig.phone_reimbursement_amount ?? 8))
+      setOtThresholdHours(String(globalConfig.ot_threshold_hours ?? 40))
     }
   }, [globalConfig])
 
@@ -65,6 +85,47 @@ export default function MgmtFeePage() {
       setCutoffError(e instanceof Error ? e.message : 'Save failed')
     } finally {
       setSavingCutoff(false)
+    }
+  }
+
+  const handleSavePrefund = async () => {
+    setSavingPrefund(true)
+    setPrefundError(null)
+    try {
+      await savePrefundToggle(prefundIncludesMgmtFee)
+      setPrefundSaved(true)
+      setTimeout(() => setPrefundSaved(false), 2500)
+    } catch (e: unknown) {
+      setPrefundError(e instanceof Error ? e.message : 'Save failed')
+    } finally {
+      setSavingPrefund(false)
+    }
+  }
+
+  const handleSaveRates = async () => {
+    const taxRate = parseFloat(payrollTaxRate)
+    const wcRate = parseFloat(workersCompRate)
+    const phone = parseFloat(phoneAmount)
+    const ot = parseFloat(otThresholdHours)
+    if (isNaN(taxRate) || taxRate < 0 || taxRate > 100) { setRatesError('Payroll tax rate must be 0–100%.'); return }
+    if (isNaN(wcRate) || wcRate < 0 || wcRate > 100) { setRatesError("Workers' comp rate must be 0–100%."); return }
+    if (isNaN(phone) || phone < 0) { setRatesError('Phone amount must be 0 or greater.'); return }
+    if (isNaN(ot) || ot < 1 || ot > 168) { setRatesError('OT threshold must be between 1 and 168 hours.'); return }
+    setSavingRates(true)
+    setRatesError(null)
+    try {
+      await saveRateSettings({
+        payrollTaxRate: taxRate / 100,
+        workersCompRate: wcRate / 100,
+        phoneAmount: phone,
+        otThresholdHours: ot,
+      })
+      setRatesSaved(true)
+      setTimeout(() => setRatesSaved(false), 2500)
+    } catch (e: unknown) {
+      setRatesError(e instanceof Error ? e.message : 'Save failed')
+    } finally {
+      setSavingRates(false)
     }
   }
 
@@ -219,6 +280,92 @@ export default function MgmtFeePage() {
             </div>
           )}
           {cutoffError && <InfoBlock variant="error">{cutoffError}</InfoBlock>}
+        </div>
+
+        {/* ── Prefund Toggle ───────────────────────────────────────────── */}
+        <div className="mt-10">
+          <SectionDivider label="Required Pre-Fund Calculation" />
+          <InfoBlock variant="default" title="Management fee in pre-fund">
+            When enabled, the Required Pre-Fund amount on the payroll review page includes the management fee
+            (gross pay + tax + workers&apos; comp + mgmt fee). Disable to exclude the fee from the pre-fund figure.
+          </InfoBlock>
+          {gcLoading ? (
+            <div className="text-sm text-[var(--muted)] py-4">Loading…</div>
+          ) : (
+            <div className="flex items-end gap-4 mt-4">
+              <FormField label="Include management fee in required prefund">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={prefundIncludesMgmtFee}
+                    onChange={e => setPrefundIncludesMgmtFee(e.target.checked)}
+                    className="h-4 w-4 accent-[var(--primary)]"
+                  />
+                  <span className="text-sm text-[var(--primary)]">
+                    {prefundIncludesMgmtFee ? 'Enabled — fee included in pre-fund' : 'Disabled — fee excluded from pre-fund'}
+                  </span>
+                </label>
+              </FormField>
+              <div className="mb-4">
+                <FormButton onClick={handleSavePrefund} loading={savingPrefund}>
+                  {prefundSaved ? <><Check size={13} className="mr-1 inline" />Saved</> : 'Save'}
+                </FormButton>
+              </div>
+            </div>
+          )}
+          {prefundError && <InfoBlock variant="error">{prefundError}</InfoBlock>}
+        </div>
+
+        {/* ── Payroll Rate Settings ────────────────────────────────────── */}
+        <div className="mt-10">
+          <SectionDivider label="Payroll Rate Settings" />
+          <InfoBlock variant="default" title="Configurable rate constants">
+            These rates are applied when calculating each week&apos;s payroll. Changes take effect on
+            the next payroll calculation — they do not retroactively alter approved weeks.
+            The FLSA overtime multiplier (1.5×) is a legal constant and cannot be changed here.
+          </InfoBlock>
+          {gcLoading ? (
+            <div className="text-sm text-[var(--muted)] py-4">Loading…</div>
+          ) : (
+            <div className="grid grid-cols-2 gap-4 mt-4">
+              <FormField label="Payroll Tax Rate (%)" helperText="Employer FICA/SUTA burden on taxable wages (default 8%)">
+                <FormInput
+                  type="number" step="0.01" min="0" max="100"
+                  value={payrollTaxRate}
+                  onChange={e => setPayrollTaxRate(e.target.value)}
+                />
+              </FormField>
+              <FormField label="Workers' Comp Rate (%)" helperText="Applied to taxable wages (default 3%)">
+                <FormInput
+                  type="number" step="0.01" min="0" max="100"
+                  value={workersCompRate}
+                  onChange={e => setWorkersCompRate(e.target.value)}
+                />
+              </FormField>
+              <FormField label="Phone Reimbursement ($)" helperText="Weekly amount per eligible employee (default $8)">
+                <FormInput
+                  type="number" step="0.01" min="0"
+                  value={phoneAmount}
+                  onChange={e => setPhoneAmount(e.target.value)}
+                />
+              </FormField>
+              <FormField label="OT Threshold (hours)" helperText="Weekly hours before overtime kicks in for eligible employees (default 40)">
+                <FormInput
+                  type="number" step="0.5" min="1" max="168"
+                  value={otThresholdHours}
+                  onChange={e => setOtThresholdHours(e.target.value)}
+                />
+              </FormField>
+            </div>
+          )}
+          {!gcLoading && (
+            <div className="flex items-center gap-4 mt-3">
+              <FormButton onClick={handleSaveRates} loading={savingRates}>
+                {ratesSaved ? <><Check size={13} className="mr-1 inline" />Saved</> : 'Save Rates'}
+              </FormButton>
+            </div>
+          )}
+          {ratesError && <InfoBlock variant="error">{ratesError}</InfoBlock>}
         </div>
 
         {/* ── Property Expense Approvers ────────────────────────────────── */}

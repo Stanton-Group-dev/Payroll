@@ -437,7 +437,7 @@ function SubmissionApprovalCard({
                 </div>
                 <div className="flex items-center gap-2 ml-3 shrink-0">
                   <a
-                    href={item.receipt_image_url}
+                    href={`/api/expense-receipt?path=${encodeURIComponent(item.receipt_image_url ?? '')}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-[var(--primary)] text-xs hover:underline flex items-center gap-1"
@@ -445,7 +445,7 @@ function SubmissionApprovalCard({
                     <Eye size={12} /> Receipt
                   </a>
                   <a
-                    href={sub.signature_url}
+                    href={`/api/expense-receipt?path=${encodeURIComponent(sub.signature_url ?? '')}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-[var(--muted)] text-xs hover:underline flex items-center gap-1"

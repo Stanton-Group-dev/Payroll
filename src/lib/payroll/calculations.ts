@@ -8,7 +8,7 @@ import type {
   PayrollMileageReimbursement,
   Property,
 } from '@/lib/supabase/types'
-import { PAYROLL_TAX_RATE, WORKERS_COMP_RATE, DEFAULT_MILEAGE_RATE } from '@/lib/payroll/config'
+import { PAYROLL_TAX_RATE, WORKERS_COMP_RATE, PHONE_REIMBURSEMENT_AMOUNT, DEFAULT_MILEAGE_RATE } from '@/lib/payroll/config'
 
 /**
  * Given an employee's rate history and a week start date, return the rate
@@ -98,10 +98,13 @@ export interface PayrollCalculationResult {
 
 export function getMgmtFeeRate(
   portfolioId: string | null,
-  configs: PayrollManagementFeeConfig[]
+  configs: PayrollManagementFeeConfig[],
+  /** ISO date string to use as the effective-date ceiling. Defaults to today when omitted. */
+  asOf?: string
 ): number {
+  const ceiling = new Date(asOf ?? new Date().toISOString().slice(0, 10))
   const effectiveConfigs = configs.filter(
-    c => new Date(c.effective_date) <= new Date()
+    c => new Date(c.effective_date) <= ceiling
   )
   effectiveConfigs.sort((a, b) =>
     new Date(b.effective_date).getTime() - new Date(a.effective_date).getTime()
@@ -141,8 +144,35 @@ export function calculatePayroll(
    *  week override if set, else default splits. Each list's pct values are weights
    *  (normalized internally, so 0–1 fractions or 0–100 both work). Drives the
    *  per-department breakdown of spread_cost; omit for no breakdown. */
-  salariedDeptSplits: Record<string, { department: string; pct: number }[]> = {}
+  salariedDeptSplits: Record<string, { department: string; pct: number }[]> = {},
+  /** ISO week-start date used for getMgmtFeeRate effective-date filtering (C-5).
+   *  When omitted, getMgmtFeeRate defaults to today — behaviour unchanged for
+   *  existing callers that don't pass weekStart. */
+  weekStart?: string,
+  /** When true (default), total_mgmt_fee is included in required_prefund (OD-5:
+   *  management fee collected at prefund time). Pass false to compute prefund as
+   *  gross + tax + WC only. */
+  prefundIncludesMgmtFee: boolean = true,
+  /**
+   * Optional overrides for rate constants that are stored in payroll_global_config.
+   * When not provided each field falls back to the corresponding config.ts constant so
+   * all existing callers (including the golden test) continue to use 0.08 / 0.03 / $8 / 40.
+   *
+   * NOTE: The FLSA OT multiplier (1.5×) is intentionally NOT included here — it is a
+   * legal invariant that must not be changed via configuration.
+   */
+  settings?: {
+    payrollTaxRate?: number
+    workersCompRate?: number
+    phoneAmount?: number
+    /** Weekly hours at which OT kicks in for eligible employees (default: 40 per FLSA). */
+    otThresholdHours?: number
+  }
 ): PayrollCalculationResult {
+  const effectivePayrollTaxRate   = settings?.payrollTaxRate    ?? PAYROLL_TAX_RATE
+  const effectiveWorkersCompRate  = settings?.workersCompRate   ?? WORKERS_COMP_RATE
+  const effectivePhoneAmount      = settings?.phoneAmount       ?? PHONE_REIMBURSEMENT_AMOUNT
+  const effectiveOtThreshold      = settings?.otThresholdHours  ?? 40
   const employeeMap = Object.fromEntries(employees.map(e => [e.id, e]))
   const propertyMap = Object.fromEntries(properties.map(p => [p.id, p]))
 
@@ -215,20 +245,20 @@ export function calculatePayroll(
     }
   }
 
-  // Enforce weekly overtime at the 40-hour threshold for OT-eligible employees.
-  // The imported reg/OT split (from Workyard, or hand-keyed manual entries) is NOT
-  // trustworthy — manual rows can carry OT while worked hours are under 40, or push
-  // regular over 40. So for anyone who actually earns the 1.5× premium, recompute from
-  // their weekly worked total: the first 40 worked hours are regular, the rest are OT.
-  // (PTO is separate and never counts toward the 40.) Non-OT-eligible workers —
-  // contractors, construction, salaried, ot_allowed=false — already had their hours
-  // folded into regular at straight time above and are left untouched.
+  // Enforce weekly overtime at the configured OT threshold (default 40 h) for OT-eligible
+  // employees.  The imported reg/OT split (from Workyard, or hand-keyed manual entries) is
+  // NOT trustworthy — manual rows can carry OT while worked hours are under the threshold,
+  // or push regular over it.  So for anyone who actually earns the 1.5× premium, recompute
+  // from their weekly worked total: the first <otThreshold> worked hours are regular, the
+  // rest are OT.  (PTO is separate and never counts toward the threshold.)
+  // Non-OT-eligible workers — contractors, construction, salaried, ot_allowed=false — already
+  // had their hours folded into regular at straight time above and are left untouched.
   for (const emp of employees) {
     const d = empData[emp.id]
     if (!d) continue
     if (otMultiplier(emp.type, emp.department, emp.ot_allowed) !== 1.5) continue
     const worked = d.regular_hours + d.ot_hours
-    const ot = Math.max(0, worked - 40)
+    const ot = Math.max(0, worked - effectiveOtThreshold)
     const reg = worked - ot
     const rate = emp.hourly_rate ?? 0
     d.regular_hours = reg
@@ -269,10 +299,15 @@ export function calculatePayroll(
     // on them (phone, mileage, tool, expense_reimbursement). They're still paid to the
     // employee (in gross, and thus in the pre-fund total); they're just removed from the
     // tax/WC base. Bonuses remain taxable wages.
-    const taxable_base = gross_pay - d.phone_reimbursement - d.mileage_reimbursement - d.nontax_reimbursement
-    const payroll_tax = emp.pay_tax ? taxable_base * PAYROLL_TAX_RATE : 0
-    const workers_comp = emp.wc ? taxable_base * WORKERS_COMP_RATE : 0
-    const feeRate = getMgmtFeeRate(null, mgmtFeeConfigs)
+    // OD-3: gross_pay already subtracts advances, so add them back to restore the
+    // pre-advance wage base. Tax and WC are charged on wages earned, not wages
+    // received net-of-advance — advances are a payment-timing mechanism, not a
+    // wage reduction.
+    const taxable_base = gross_pay - d.phone_reimbursement - d.mileage_reimbursement - d.nontax_reimbursement + d.advances
+    const payroll_tax = emp.pay_tax ? taxable_base * effectivePayrollTaxRate : 0
+    const workers_comp = emp.wc ? taxable_base * effectiveWorkersCompRate : 0
+    // C-5: pass the week's start date so the fee rate is point-in-time, not today.
+    const feeRate = getMgmtFeeRate(null, mgmtFeeConfigs, weekStart)
     // Mileage is a direct pass-through cost billed to the property at cost — the
     // management fee (general overhead) does NOT apply to it, so it's excluded from
     // the fee base. (Phone/tools remain in the base; they're general spread, not direct.)
@@ -443,7 +478,8 @@ export function calculatePayroll(
     const labor = propLaborCost[prop.id] ?? 0
     const spread = propSpreadCost[prop.id] ?? 0
     const mileage = propMileageCost[prop.id] ?? 0
-    const feeRate = getMgmtFeeRate(prop.portfolio_id, mgmtFeeConfigs)
+    // C-5: use the week's start date so the fee rate is point-in-time.
+    const feeRate = getMgmtFeeRate(prop.portfolio_id, mgmtFeeConfigs, weekStart)
     // Mileage is pass-through: billed to the property at cost, NOT in the fee base.
     const mgmt_fee = (labor + spread) * feeRate
     const total_cost = labor + spread + mileage + mgmt_fee
@@ -466,8 +502,16 @@ export function calculatePayroll(
   const total_gross_pay = employee_summaries.reduce((s, e) => s + e.gross_pay, 0)
   const total_payroll_tax = employee_summaries.reduce((s, e) => s + e.payroll_tax, 0)
   const total_workers_comp = employee_summaries.reduce((s, e) => s + e.workers_comp, 0)
-  const total_mgmt_fee = employee_summaries.reduce((s, e) => s + e.management_fee, 0)
-  const required_prefund = round2(total_gross_pay + total_payroll_tax + total_workers_comp)
+  // OD-4: property_costs is the authoritative fee total (properties own the fee rate;
+  // per-employee management_fee is display-only and should not drive the cash total).
+  const total_mgmt_fee = property_costs.reduce((s, p) => s + p.mgmt_fee, 0)
+  // OD-5: include the management fee in the prefund by default so the collected amount
+  // covers all obligations. Callers can opt out with prefundIncludesMgmtFee=false to
+  // get the gross+tax+WC-only figure.
+  const required_prefund = round2(
+    total_gross_pay + total_payroll_tax + total_workers_comp +
+    (prefundIncludesMgmtFee ? total_mgmt_fee : 0)
+  )
 
   return {
     employee_summaries,

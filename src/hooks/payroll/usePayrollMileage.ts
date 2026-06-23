@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { resolveMileageRateAsOf } from '@/lib/payroll/calculations'
+import { assertWeekWritable } from '@/lib/payroll/weekLock'
 import type {
   PayrollEmployee,
   PayrollMileageRate,
@@ -111,6 +112,7 @@ export function usePayrollMileage(weekId: string | undefined) {
   }) => {
     if (!weekId) throw new Error('No week selected')
     const supabase = createClient()
+    await assertWeekWritable(supabase, weekId)
     const userId = (await supabase.auth.getUser()).data.user?.id ?? null
     const amount = round2(params.milesApproved * rate)
     const reviewed = params.status !== 'pending'
