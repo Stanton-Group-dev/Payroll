@@ -41,7 +41,8 @@ export default function ImportPage() {
   const [parseErrors, setParseErrors] = useState<string[]>([])
   const [importing, setImporting] = useState(false)
   const [importDone, setImportDone] = useState(false)
-  const [importSummary, setImportSummary] = useState({ imported: 0, flagged: 0, errors: 0 })
+  const [importSummary, setImportSummary] = useState({ imported: 0, flagged: 0, errors: 0, failed: 0 })
+  const [importFailures, setImportFailures] = useState<string[]>([])
   const [apiFetching, setApiFetching] = useState(false)
   const [apiStats, setApiStats] = useState<{ total: number; allocations: number } | null>(null)
 
@@ -235,7 +236,8 @@ export default function ImportPage() {
       setImporting(false)
       return
     }
-    let imported = 0, flagged = 0, errors = 0
+    let imported = 0, flagged = 0, errors = 0, failed = 0
+    const failures: string[] = []
 
     for (const row of preview) {
       if (row.status === 'unmatched_employee') { errors++; continue }
@@ -258,15 +260,26 @@ export default function ImportPage() {
           cost_code: row.costCode || null,
           cost_code_name: row.costCodeName || null,
         })
-        if (insertErr) throw new Error(insertErr.message)
+        if (insertErr) throw insertErr
         if (row.status === 'flagged') flagged++
         else imported++
-      } catch {
-        errors++
+      } catch (e) {
+        // Never swallow silently: a dropped insert is lost time. A 23505 unique
+        // violation here means the row collided with an existing/duplicate identity
+        // (see migration 20260623_04) — surface it so it can't vanish unnoticed.
+        failed++
+        const msg = e instanceof Error ? e.message : String(e)
+        const dup = /duplicate key|23505/i.test(msg)
+        failures.push(
+          `${row.employeeName2 ?? row.employeeName} • ${row.entryDate} • ${row.propertyName ?? row.projectName}` +
+          ` • ${row.costCodeName || row.costCode || '—'} • ${(row.regularHours + row.otHours).toFixed(2)}h` +
+          (dup ? ' — duplicate of an existing entry (skipped)' : ` — ${msg}`)
+        )
       }
     }
 
-    setImportSummary({ imported, flagged, errors })
+    setImportFailures(failures)
+    setImportSummary({ imported, flagged, errors, failed })
     setImportDone(true)
     setImporting(false)
     await refetchWeeks()
@@ -298,10 +311,18 @@ export default function ImportPage() {
 
         {importDone ? (
           <div>
-            <InfoBlock variant="success" title="Import Complete">
-              <p>{importSummary.imported} entries imported • {importSummary.flagged} flagged for correction • {importSummary.errors} skipped (no match)</p>
+            <InfoBlock variant={importSummary.failed > 0 ? 'warning' : 'success'} title="Import Complete">
+              <p>{importSummary.imported} entries imported • {importSummary.flagged} flagged for correction • {importSummary.errors} skipped (no match){importSummary.failed > 0 ? ` • ${importSummary.failed} failed to insert` : ''}</p>
               {importSummary.flagged > 0 && (
                 <p className="mt-1">Go to <a href={`/payroll/corrections?week=${selectedWeekId}`} className="underline">Correction Queue</a> to resolve flagged entries.</p>
+              )}
+              {importFailures.length > 0 && (
+                <div className="mt-2">
+                  <p className="font-medium">These rows did not import — review before relying on totals:</p>
+                  <ul className="mt-1 list-disc list-inside font-mono text-xs space-y-0.5">
+                    {importFailures.map((f, i) => <li key={i}>{f}</li>)}
+                  </ul>
+                </div>
               )}
             </InfoBlock>
             <FormButton variant="secondary" onClick={() => { resetPreview(); setImportDone(false) }} className="mt-4">
