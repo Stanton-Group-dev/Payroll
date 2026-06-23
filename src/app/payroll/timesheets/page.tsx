@@ -11,6 +11,7 @@ import { useProperties } from '@/hooks/payroll/useProperties'
 import { usePortfolios } from '@/hooks/payroll/usePortfolios'
 import { useTimesheetAdjustments } from '@/hooks/payroll/useTimesheetAdjustments'
 import { useWorkyardReconciliation } from '@/hooks/payroll/useWorkyardReconciliation'
+import { useAccountedRemovedHours } from '@/hooks/payroll/useAccountedRemovedHours'
 import { PageHeader, FormSelect, FormField, FormButton } from '@/components/form'
 import { EmployeeSwitcher } from './components/EmployeeSwitcher'
 import { WeekGrid } from './components/WeekGrid'
@@ -65,6 +66,7 @@ function TimesheetsPageContent() {
   const { hoursByWorkyardId, available: reconAvailable } = useWorkyardReconciliation(
     weeks.find(w => w.id === selectedWeekId)?.week_start ?? null
   )
+  const { accountedRemovedByEmployee } = useAccountedRemovedHours(selectedWeekId || null)
   const SHORT_THRESHOLD = 0.05
   const shortByEmployee = useMemo(() => {
     const m = new Map<string, { expected: number; recorded: number; short: number }>()
@@ -73,14 +75,18 @@ function TimesheetsPageContent() {
       if (!emp.workyard_id) continue
       const expected = hoursByWorkyardId.get(emp.workyard_id)
       if (expected == null) continue
-      const recorded = allEntries
+      // recorded_effective = active hours + hours removed WITH a logged correction
+      // (deliberate docks / reallocations), so only never-captured or unlogged-deleted
+      // Workyard time reads as short.
+      const active = allEntries
         .filter(e => e.employee_id === emp.id)
         .reduce((s, e) => s + e.regular_hours + e.ot_hours, 0)
+      const recorded = active + (accountedRemovedByEmployee.get(emp.id) ?? 0)
       const short = Math.round((expected - recorded) * 100) / 100
       if (short > SHORT_THRESHOLD) m.set(emp.id, { expected, recorded, short })
     }
     return m
-  }, [reconAvailable, employees, hoursByWorkyardId, allEntries])
+  }, [reconAvailable, employees, hoursByWorkyardId, allEntries, accountedRemovedByEmployee])
 
   const activeWeeks = weeks.filter(w => !['statement_sent'].includes(w.status))
   const approvedWeeks = weeks.filter(w => ['payroll_approved', 'invoiced', 'statement_sent'].includes(w.status))
