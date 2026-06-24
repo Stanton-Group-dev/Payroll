@@ -89,38 +89,45 @@ export function useTimesheetAdjustments(weekId: string | null) {
   // ── Operations ────────────────────────────────────────────────────────────
 
   const reassign = useCallback(async (
-    entryId: string,
+    entryIds: string[],
     splits: SplitTarget[],
     reason: string
   ) => {
     const supabase = createClient()
     const userId = (await supabase.auth.getUser()).data.user?.id ?? null
-    const entry = allEntries.find(e => e.id === entryId)
-    if (!entry) throw new Error('Entry not found')
+    // An unallocated cell can hold several same-day entries for one employee;
+    // the whole block is reassigned together. (Allocated edits pass one id.)
+    const entries = entryIds
+      .map(id => allEntries.find(e => e.id === id))
+      .filter((e): e is PayrollTimeEntry => Boolean(e))
+    if (entries.length === 0) throw new Error('Entry not found')
+    const first = entries[0]
 
     const totalSplit = splits.reduce((s, t) => s + t.hours, 0)
-    const entryTotal = entry.regular_hours + entry.ot_hours
-    if (Math.abs(totalSplit - entryTotal) > 0.01) {
-      throw new Error(`Split hours (${totalSplit}) must equal entry total (${entryTotal})`)
+    const blockTotal = parseFloat(
+      entries.reduce((s, e) => s + e.regular_hours + e.ot_hours, 0).toFixed(2)
+    )
+    if (Math.abs(totalSplit - blockTotal) > 0.01) {
+      throw new Error(`Split hours (${totalSplit}) must equal entry total (${blockTotal})`)
     }
 
     const isSplit = splits.length > 1
     const operation = isSplit ? 'split' : 'reassign'
 
     if (isSplit) {
-      // Deactivate original entry
+      // Deactivate every source entry in the block
       const { error: deactErr } = await supabase
         .from('payroll_time_entries')
         .update({ is_active: false })
-        .eq('id', entryId)
+        .in('id', entryIds)
       if (deactErr) throw new Error(deactErr.message)
 
       // Create one new entry per split target
       const newEntries = splits.map(t => ({
-        payroll_week_id: entry.payroll_week_id,
-        employee_id: entry.employee_id,
+        payroll_week_id: first.payroll_week_id,
+        employee_id: first.employee_id,
         property_id: t.propertyId,
-        entry_date: entry.entry_date,
+        entry_date: first.entry_date,
         regular_hours: t.hours,
         ot_hours: 0,
         pto_hours: 0,
@@ -137,7 +144,7 @@ export function useTimesheetAdjustments(weekId: string | null) {
       // Write correction records for each split leg
       const corrRows = (inserted ?? []).map((row, i) => ({
         time_entry_id: row.id,
-        from_property_id: entry.property_id,
+        from_property_id: first.property_id,
         to_property_id: splits[i].propertyId,
         hours: splits[i].hours,
         reason,
@@ -148,7 +155,8 @@ export function useTimesheetAdjustments(weekId: string | null) {
       const { error: corrSplitErr } = await supabase.from('payroll_timesheet_corrections').insert(corrRows)
       if (corrSplitErr) console.error('payroll_timesheet_corrections insert (split)', corrSplitErr)
     } else {
-      // Simple reassign
+      // Simple reassign — move every source entry in the block to the property,
+      // preserving each entry's own regular/OT hours.
       const { error: updErr } = await supabase
         .from('payroll_time_entries')
         .update({
@@ -159,19 +167,21 @@ export function useTimesheetAdjustments(weekId: string | null) {
           pending_note: null,
           pending_since: null,
         })
-        .eq('id', entryId)
+        .in('id', entryIds)
       if (updErr) throw new Error(updErr.message)
 
-      const { error: corrReassignErr } = await supabase.from('payroll_timesheet_corrections').insert({
-        time_entry_id: entryId,
-        from_property_id: entry.property_id,
+      // One correction row per moved entry, carrying that entry's own hours.
+      const corrRows = entries.map(e => ({
+        time_entry_id: e.id,
+        from_property_id: e.property_id,
         to_property_id: splits[0].propertyId,
-        hours: entryTotal,
+        hours: e.regular_hours + e.ot_hours,
         reason,
         operation,
         corrected_by: userId,
         corrected_at: new Date().toISOString(),
-      })
+      }))
+      const { error: corrReassignErr } = await supabase.from('payroll_timesheet_corrections').insert(corrRows)
       if (corrReassignErr) console.error('payroll_timesheet_corrections insert (reassign)', corrReassignErr)
     }
 
@@ -214,7 +224,7 @@ export function useTimesheetAdjustments(weekId: string | null) {
     propertyIds: string[]
     portfolioId?: string
     reason: string
-    sourceEntryId?: string
+    sourceEntryIds?: string[]
   }) => {
     if (params.propertyIds.length === 0) throw new Error('Select at least one property')
     if (params.totalHours <= 0) throw new Error('Hours to spread must be greater than 0')
@@ -271,23 +281,33 @@ export function useTimesheetAdjustments(weekId: string | null) {
     const { error: entErr } = await supabase.from('payroll_time_entries').insert(entries)
     if (entErr) throw new Error(entErr.message)
 
-    // Reconcile the source unallocated entry. When the full block was spread we
-    // deactivate it; when only part was spread we keep it active holding the
-    // remainder so the leftover hours stay visible as unallocated.
-    if (params.sourceEntryId) {
-      const src = allEntries.find(e => e.id === params.sourceEntryId)
-      const srcTotal = src ? (src.regular_hours ?? 0) + (src.ot_hours ?? 0) : 0
-      const remainder = parseFloat((srcTotal - params.totalHours).toFixed(2))
-      if (src && remainder > 0.01) {
-        const { error: srcPartialErr } = await supabase.from('payroll_time_entries')
-          .update({ regular_hours: remainder, ot_hours: 0 })
-          .eq('id', params.sourceEntryId)
-        if (srcPartialErr) throw new Error(srcPartialErr.message)
-      } else {
-        const { error: srcDeactErr } = await supabase.from('payroll_time_entries')
-          .update({ is_active: false })
-          .eq('id', params.sourceEntryId)
-        if (srcDeactErr) throw new Error(srcDeactErr.message)
+    // Reconcile the source unallocated entries. We absorb `totalHours` across the
+    // whole block in order: each fully-spread entry is deactivated, and the entry
+    // that straddles the boundary is shrunk to the leftover so any remainder
+    // stays visible as unallocated. (Previously only the first entry was touched,
+    // leaving the rest of a multi-entry block stranded as unallocated.)
+    if (params.sourceEntryIds?.length) {
+      const sources = params.sourceEntryIds
+        .map(id => allEntries.find(e => e.id === id))
+        .filter((e): e is PayrollTimeEntry => Boolean(e))
+      let toAbsorb = params.totalHours
+      for (const src of sources) {
+        if (toAbsorb <= 0.01) break
+        const srcTotal = (src.regular_hours ?? 0) + (src.ot_hours ?? 0)
+        if (srcTotal <= toAbsorb + 0.01) {
+          const { error: srcDeactErr } = await supabase.from('payroll_time_entries')
+            .update({ is_active: false })
+            .eq('id', src.id)
+          if (srcDeactErr) throw new Error(srcDeactErr.message)
+          toAbsorb = parseFloat((toAbsorb - srcTotal).toFixed(2))
+        } else {
+          const remainder = parseFloat((srcTotal - toAbsorb).toFixed(2))
+          const { error: srcPartialErr } = await supabase.from('payroll_time_entries')
+            .update({ regular_hours: remainder, ot_hours: 0 })
+            .eq('id', src.id)
+          if (srcPartialErr) throw new Error(srcPartialErr.message)
+          toAbsorb = 0
+        }
       }
     }
 

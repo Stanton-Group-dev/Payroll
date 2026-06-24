@@ -309,10 +309,10 @@ interface InlineDrawerProps {
   allProperties: PropertyOption[]
   isLocked: boolean
   onClose: () => void
-  reassign: (entryId: string, splits: { propertyId: string; hours: number }[], reason: string) => Promise<void>
+  reassign: (entryIds: string[], splits: { propertyId: string; hours: number }[], reason: string) => Promise<void>
   spread: (params: {
     employeeId: string; date: string; totalHours: number
-    propertyIds: string[]; portfolioId?: string; reason: string; sourceEntryId?: string
+    propertyIds: string[]; portfolioId?: string; reason: string; sourceEntryIds?: string[]
   }) => Promise<void>
   removeEntry: (entryId: string, reason: string) => Promise<void>
   reduceHours: (entryId: string, hoursToRemove: number, reason: string) => Promise<void>
@@ -328,6 +328,13 @@ export function InlineDrawer({
 }: InlineDrawerProps) {
   const isUnallocated = cell.rowPropertyId === null
   const primaryEntry = cell.entries[0]
+  // Unallocated cells collapse every same-day entry for the employee into one
+  // cell, so every action here operates on the whole block — the summed hours
+  // the grid shows — not just the first entry. (Allocated cells, edited one at a
+  // time, keep the single primary-entry total.)
+  const blockHours = isUnallocated
+    ? parseFloat(cell.entries.reduce((s, e) => s + e.regular_hours + e.ot_hours, 0).toFixed(2))
+    : (primaryEntry ? primaryEntry.regular_hours + primaryEntry.ot_hours : 0)
   // NOTE: all hooks must run before any early return (rules-of-hooks). Initializers
   // are null-safe so the hook order stays stable even when there is no entry; the
   // `!primaryEntry` guard happens after every hook below.
@@ -356,13 +363,13 @@ export function InlineDrawer({
   const [spreadPropertyIds, setSpreadPropertyIds] = useState<string[]>([])
   const [spreadReason, setSpreadReason] = useState('')
   const [spreadAmount, setSpreadAmount] = useState<string>(
-    primaryEntry ? String(primaryEntry.regular_hours + primaryEntry.ot_hours) : ''
+    primaryEntry ? String(blockHours) : ''
   )
 
   // Reset the spread amount to the full block whenever a different cell is opened.
   useEffect(() => {
-    if (primaryEntry) setSpreadAmount(String(primaryEntry.regular_hours + primaryEntry.ot_hours))
-  }, [primaryEntry?.id])
+    setSpreadAmount(String(blockHours))
+  }, [primaryEntry?.id, blockHours])
 
   // Pending form
   const [pendingNote, setPendingNote] = useState(primaryEntry?.pending_note ?? '')
@@ -378,7 +385,7 @@ export function InlineDrawer({
   // Reported up so the page can prompt before switching to another cell.
   const pendingNoteBaseline = primaryEntry?.pending_note ?? ''
   const spreadAmountBaseline = primaryEntry
-    ? String(primaryEntry.regular_hours + primaryEntry.ot_hours)
+    ? String(blockHours)
     : ''
   const isDirty =
     assignProp !== '' ||
@@ -403,29 +410,28 @@ export function InlineDrawer({
   // Safe to bail now that every hook has been called unconditionally.
   if (!primaryEntry) return null
 
-  const entryHours = primaryEntry.regular_hours + primaryEntry.ot_hours
   const entryDate = format(parseISO(primaryEntry.entry_date), 'EEE, MMM d')
   const splitTotal = splitRows.reduce((s, r) => s + (parseFloat(r.hours) || 0), 0)
-  const splitRemaining = parseFloat((entryHours - splitTotal).toFixed(2))
+  const splitRemaining = parseFloat((blockHours - splitTotal).toFixed(2))
 
   // Split handlers — picking properties auto-distributes hours evenly; typing a
   // value locks that row and rebalances the rest. `Split evenly` clears locks.
   const pctToHours = (pct: string) =>
-    pct === '' ? '' : String(parseFloat((entryHours * (parseFloat(pct) || 0) / 100).toFixed(2)))
+    pct === '' ? '' : String(parseFloat((blockHours * (parseFloat(pct) || 0) / 100).toFixed(2)))
   const hoursToPct = (h: string) =>
-    h === '' || entryHours === 0 ? '' : String(Math.round((parseFloat(h) / entryHours) * 100))
+    h === '' || blockHours === 0 ? '' : String(Math.round((parseFloat(h) / blockHours) * 100))
   const setSplitProperty = (i: number, propertyId: string) =>
-    setSplitRows(rows => balanceSplitRows(rows.map((r, j) => j === i ? { ...r, propertyId } : r), entryHours))
+    setSplitRows(rows => balanceSplitRows(rows.map((r, j) => j === i ? { ...r, propertyId } : r), blockHours))
   const setSplitHours = (i: number, hours: string) =>
-    setSplitRows(rows => balanceSplitRows(rows.map((r, j) => j === i ? { ...r, hours, locked: true } : r), entryHours))
+    setSplitRows(rows => balanceSplitRows(rows.map((r, j) => j === i ? { ...r, hours, locked: true } : r), blockHours))
   const addSplitRow = () =>
-    setSplitRows(rows => balanceSplitRows([...rows, { propertyId: '', hours: '' }], entryHours))
+    setSplitRows(rows => balanceSplitRows([...rows, { propertyId: '', hours: '' }], blockHours))
   const removeSplitRow = (i: number) =>
-    setSplitRows(rows => balanceSplitRows(rows.filter((_, j) => j !== i), entryHours))
+    setSplitRows(rows => balanceSplitRows(rows.filter((_, j) => j !== i), blockHours))
   const splitEvenly = () =>
-    setSplitRows(rows => balanceSplitRows(rows.map(r => ({ ...r, locked: false })), entryHours))
+    setSplitRows(rows => balanceSplitRows(rows.map(r => ({ ...r, locked: false })), blockHours))
   const spreadHours = parseFloat(spreadAmount) || 0
-  const spreadRemaining = parseFloat((entryHours - spreadHours).toFixed(2))
+  const spreadRemaining = parseFloat((blockHours - spreadHours).toFixed(2))
 
   const tabs: { id: DrawerTab; label: string }[] = isUnallocated
     ? [
@@ -450,22 +456,22 @@ export function InlineDrawer({
       if (activeTab === 'assign') {
         if (!assignProp) throw new Error('Select a property')
         if (!assignReason) throw new Error('Select a reason')
-        await reassign(primaryEntry.id, [{ propertyId: assignProp, hours: entryHours }], assignReason)
+        await reassign(cell.entries.map(e => e.id), [{ propertyId: assignProp, hours: blockHours }], assignReason)
         onDone()
       } else if (activeTab === 'split') {
         if (!splitReason.trim()) throw new Error('Reason required')
         if (Math.abs(splitRemaining) > 0.01)
-          throw new Error(`Hours must sum to ${entryHours} (${splitRemaining > 0 ? splitRemaining + 'h remaining' : Math.abs(splitRemaining) + 'h over'})`)
+          throw new Error(`Hours must sum to ${blockHours} (${splitRemaining > 0 ? splitRemaining + 'h remaining' : Math.abs(splitRemaining) + 'h over'})`)
         const targets = splitRows
           .filter(r => r.propertyId && parseFloat(r.hours) > 0)
           .map(r => ({ propertyId: r.propertyId, hours: parseFloat(r.hours) }))
         if (targets.length < 2) throw new Error('At least 2 split targets required')
-        await reassign(primaryEntry.id, targets, splitReason)
+        await reassign(cell.entries.map(e => e.id), targets, splitReason)
         onDone()
       } else if (activeTab === 'spread') {
         if (spreadPropertyIds.length === 0) throw new Error('Select at least one property')
         if (spreadHours <= 0) throw new Error('Enter hours to spread (> 0)')
-        if (spreadHours > entryHours + 0.01) throw new Error(`Cannot spread more than ${entryHours}h available`)
+        if (spreadHours > blockHours + 0.01) throw new Error(`Cannot spread more than ${blockHours}h available`)
         if (!spreadReason.trim()) throw new Error('Reason required')
         await spread({
           employeeId: primaryEntry.employee_id,
@@ -474,7 +480,7 @@ export function InlineDrawer({
           propertyIds: spreadPropertyIds,
           portfolioId: getSpreadPortfolioId(),
           reason: spreadReason,
-          sourceEntryId: primaryEntry.id,
+          sourceEntryIds: cell.entries.map(e => e.id),
         })
         onDone()
       } else if (activeTab === 'pending') {
@@ -504,7 +510,7 @@ export function InlineDrawer({
           <span className="mx-1.5 text-[var(--muted)]">·</span>
           <span className="text-[var(--muted)]">{entryDate}</span>
           <span className="mx-1.5 text-[var(--muted)]">·</span>
-          <span className="font-medium text-[var(--ink)]">{entryHours}h</span>
+          <span className="font-medium text-[var(--ink)]">{blockHours}h</span>
           {cell.entries.length > 1 && (
             <span className="ml-1.5 text-[var(--muted)]">({cell.entries.length} entries)</span>
           )}
@@ -559,7 +565,7 @@ export function InlineDrawer({
             </div>
             <FormButton size="sm" onClick={save} loading={saving}
               disabled={!assignProp || !assignReason}>
-              Assign {entryHours}h →
+              Assign {blockHours}h →
             </FormButton>
           </div>
         )}
@@ -568,7 +574,7 @@ export function InlineDrawer({
         {activeTab === 'split' && (
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-xs text-[var(--muted)]">Distribute {entryHours}h across properties</span>
+              <span className="text-xs text-[var(--muted)]">Distribute {blockHours}h across properties</span>
               <div className="flex items-center gap-2">
                 <div className="flex rounded border border-[var(--border)] overflow-hidden text-[10px]">
                   {(['hrs', 'pct'] as const).map(u => (
@@ -629,16 +635,16 @@ export function InlineDrawer({
               <label className="flex items-center gap-2 text-xs text-[var(--muted)] shrink-0">
                 <span>Spread</span>
                 <div className="w-20">
-                  <FormInput type="number" step="0.25" min="0" max={entryHours}
+                  <FormInput type="number" step="0.25" min="0" max={blockHours}
                     value={spreadAmount} onChange={e => setSpreadAmount(e.target.value)} />
                 </div>
-                <span>of {entryHours}h evenly across selected properties</span>
+                <span>of {blockHours}h evenly across selected properties</span>
               </label>
-              {Math.abs(spreadRemaining) > 0.01 && spreadHours > 0 && spreadHours <= entryHours && (
+              {Math.abs(spreadRemaining) > 0.01 && spreadHours > 0 && spreadHours <= blockHours && (
                 <span className="text-xs text-[var(--warning)]">{spreadRemaining}h will stay unallocated</span>
               )}
-              {spreadHours > entryHours + 0.01 && (
-                <span className="text-xs text-[var(--error)]">exceeds {entryHours}h available</span>
+              {spreadHours > blockHours + 0.01 && (
+                <span className="text-xs text-[var(--error)]">exceeds {blockHours}h available</span>
               )}
             </div>
             <MultiPortfolioSpreadPicker
@@ -652,7 +658,7 @@ export function InlineDrawer({
               placeholder="Reason (required)" rows={2} />
             <div className="flex gap-2">
               <FormButton size="sm" onClick={save} loading={saving}
-                disabled={spreadPropertyIds.length === 0 || spreadHours <= 0 || spreadHours > entryHours + 0.01}>
+                disabled={spreadPropertyIds.length === 0 || spreadHours <= 0 || spreadHours > blockHours + 0.01}>
                 Create {spreadPropertyIds.length > 0 ? spreadPropertyIds.length : '—'} entries
               </FormButton>
               <FormButton size="sm" variant="ghost" onClick={onClose}>Cancel</FormButton>
@@ -684,7 +690,7 @@ export function InlineDrawer({
           <div className="space-y-4">
             <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-[var(--muted)]">
               <span><span className="font-medium text-[var(--ink)]">Property:</span> {prop ? `${prop.code} — ${prop.name}` : '—'}</span>
-              <span><span className="font-medium text-[var(--ink)]">Hours:</span> {entryHours}h</span>
+              <span><span className="font-medium text-[var(--ink)]">Hours:</span> {blockHours}h</span>
               <span><span className="font-medium text-[var(--ink)]">Source:</span> {SOURCE_LABELS[primaryEntry.source] ?? primaryEntry.source}</span>
               {cell.entries.length > 1 && (
                 <span className="text-[var(--muted)]">+{cell.entries.length - 1} more entries on this day</span>
@@ -715,7 +721,7 @@ export function InlineDrawer({
                         if (!editReason) { setErr('Select a reason'); return }
                         setErr(null); setSaving(true)
                         try {
-                          await reassign(primaryEntry.id, [{ propertyId: editProp, hours: entryHours }], editReason)
+                          await reassign([primaryEntry.id], [{ propertyId: editProp, hours: blockHours }], editReason)
                           onDone()
                         } catch (e: unknown) {
                           setErr(e instanceof Error ? e.message : 'Reassign failed')
@@ -723,24 +729,24 @@ export function InlineDrawer({
                       }}
                       loading={saving}
                       disabled={!editProp || !editReason}>
-                      Reassign {entryHours}h →
+                      Reassign {blockHours}h →
                     </FormButton>
                   </div>
                 </div>
                 <div className="space-y-2 pt-2 border-t border-[var(--divider)]">
                   <p className="text-xs font-medium text-[var(--ink)]">Reduce hours</p>
-                  <p className="text-xs text-[var(--muted)]">Cut some of the {entryHours}h off this entry (e.g. over-reported time) and keep the rest. To remove the whole entry, use Remove below.</p>
+                  <p className="text-xs text-[var(--muted)]">Cut some of the {blockHours}h off this entry (e.g. over-reported time) and keep the rest. To remove the whole entry, use Remove below.</p>
                   {(() => {
                     const reduceVal = parseFloat(reduceAmount) || 0
-                    const newTotal = parseFloat((entryHours - reduceVal).toFixed(2))
-                    const reduceValid = reduceVal > 0 && reduceVal < entryHours
+                    const newTotal = parseFloat((blockHours - reduceVal).toFixed(2))
+                    const reduceValid = reduceVal > 0 && reduceVal < blockHours
                     return (
                       <>
                         <div className="flex flex-wrap items-center gap-2">
                           <label className="flex items-center gap-2 text-xs text-[var(--muted)]">
                             <span>Remove</span>
                             <div className="w-20">
-                              <FormInput type="number" step="0.25" min="0" max={entryHours}
+                              <FormInput type="number" step="0.25" min="0" max={blockHours}
                                 value={reduceAmount} onChange={e => setReduceAmount(e.target.value)} placeholder="hrs" />
                             </div>
                             <span>hours</span>
@@ -748,7 +754,7 @@ export function InlineDrawer({
                           {reduceVal > 0 && (
                             reduceValid
                               ? <span className="text-xs text-[var(--muted)]">new total: <span className="font-medium text-[var(--ink)]">{newTotal}h</span></span>
-                              : <span className="text-xs text-[var(--error)]">must be more than 0 and less than {entryHours}h</span>
+                              : <span className="text-xs text-[var(--error)]">must be more than 0 and less than {blockHours}h</span>
                           )}
                         </div>
                         <FormTextarea value={reduceReason} onChange={e => setReduceReason(e.target.value)}
@@ -756,7 +762,7 @@ export function InlineDrawer({
                         <div className="flex gap-2">
                           <FormButton size="sm"
                             onClick={async () => {
-                              if (!reduceValid) { setErr(`Enter hours to remove (more than 0, less than ${entryHours})`); return }
+                              if (!reduceValid) { setErr(`Enter hours to remove (more than 0, less than ${blockHours})`); return }
                               if (!reduceReason.trim()) { setErr('Reduction reason required'); return }
                               setErr(null); setSaving(true)
                               try {
