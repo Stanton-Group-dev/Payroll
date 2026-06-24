@@ -29,6 +29,22 @@ export function isTwilioLive(): boolean {
   return isTwilioConfigured() && process.env.TWILIO_MOCK !== '1'
 }
 
+/**
+ * Normalize a phone to E.164 (the only format Twilio's `To` accepts). Employee
+ * numbers are stored inconsistently — some already `+1XXXXXXXXXX`, many as
+ * `(860) 555-1234` — so without this, ~1/3 of sends would fail at Twilio.
+ * Returns null when the input can't be made a plausible US/E.164 number, so the
+ * caller can record a clear 'failed' outbox row instead of firing a bad request.
+ */
+export function toE164(raw: string): string | null {
+  const trimmed = raw.trim()
+  if (/^\+[1-9]\d{6,14}$/.test(trimmed)) return trimmed // already E.164
+  const digits = trimmed.replace(/\D/g, '')
+  if (digits.length === 10) return `+1${digits}`
+  if (digits.length === 11 && digits.startsWith('1')) return `+${digits}`
+  return null
+}
+
 export type SmsResult =
   | { status: 'sent'; provider: 'twilio'; providerRef: string }
   | { status: 'dry_run'; provider: 'mock'; providerRef: null }
@@ -44,7 +60,12 @@ export async function sendSms(to: string, body: string): Promise<SmsResult> {
     return { status: 'dry_run', provider: 'mock', providerRef: null }
   }
 
-  const form = new URLSearchParams({ To: to, Body: body })
+  const e164 = toE164(to)
+  if (!e164) {
+    return { status: 'failed', provider: 'twilio', providerRef: null, error: `Unsendable phone number: ${to}` }
+  }
+
+  const form = new URLSearchParams({ To: e164, Body: body })
   if (MESSAGING_SERVICE_SID) form.set('MessagingServiceSid', MESSAGING_SERVICE_SID)
   else form.set('From', FROM_NUMBER!)
 
