@@ -24,9 +24,20 @@ async function launch(): Promise<Browser> {
   if (executablePath) {
     return puppeteer.launch({
       executablePath,
-      // --no-sandbox is required when Chromium runs as a non-root user in a container with no
-      // user namespaces; --disable-dev-shm-usage avoids crashes on the small /dev/shm there.
-      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+      // Flags for headless Chromium as a non-root user in a container:
+      //  --no-sandbox / --disable-setuid-sandbox : no user namespaces available.
+      //  --disable-dev-shm-usage                 : small /dev/shm would crash the renderer.
+      //  --disable-gpu                           : no GPU in the container.
+      //  --disable-crash-reporter / --no-zygote  : stop the crashpad handler that fails with
+      //                                            "--database is required" and kills launch.
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+        '--disable-crash-reporter',
+        '--no-zygote',
+      ],
       defaultViewport: { width: 1280, height: 1696 },
       headless: true,
     })

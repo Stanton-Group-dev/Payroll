@@ -49,7 +49,10 @@ RUN apt-get update \
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 RUN groupadd --system --gid 1001 nodejs \
-  && useradd --system --uid 1001 --gid nodejs nextjs
+  && useradd --system --uid 1001 --gid nodejs --create-home --home-dir /home/nextjs nextjs
+# Chromium (run as the non-root nextjs user) needs a writable HOME for its config/crash dir —
+# without it the crashpad handler dies and the browser process fails to launch.
+ENV HOME=/home/nextjs
 
 # `output: 'standalone'` produces a self-contained server + the minimal node_modules it needs.
 COPY --from=builder /app/public ./public
