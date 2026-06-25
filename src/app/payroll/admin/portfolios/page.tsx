@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Plus, ChevronRight, ChevronDown, Pencil, Check, Building2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/hooks/payroll/useAuth'
+import { isHiddenProperty } from '@/lib/payroll/properties'
 import {
   PageHeader, FormButton, FormField, FormInput, FormTextarea, FormSelect,
   InfoBlock, SectionDivider, Drawer,
@@ -43,6 +44,9 @@ interface CreatePropertyInput {
   portfolio_id: string | null
   is_active: boolean
 }
+
+// The Westend billing entities, offered as one-tap "move into Westend" presets.
+const WESTEND_LLCS = ['SREP Westend LLC', 'SREP Westend 81 LLC', 'SREP Westend 77 LLC', 'SREP Westend Oxford LLC']
 
 type WizardStep = 'details' | 'properties' | 'llc' | 'fee' | 'confirm'
 
@@ -104,15 +108,27 @@ export default function PortfoliosPage() {
   const [editForm, setEditForm] = useState<{ id: string; name: string; description: string; owner_llc: string; is_active: boolean } | null>(null)
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
+  const [editPropOpen, setEditPropOpen] = useState(false)
+  const [editPropForm, setEditPropForm] = useState<{ id: string; code: string; name: string; billing_llc: string; portfolio_id: string | null; is_active: boolean } | null>(null)
+  const [editPropSaving, setEditPropSaving] = useState(false)
+  const [editPropError, setEditPropError] = useState<string | null>(null)
+  const [showUnassigned, setShowUnassigned] = useState(false)
+  const [managePropsOpen, setManagePropsOpen] = useState(false)
+  const [managePortfolio, setManagePortfolio] = useState<Portfolio | null>(null)
+  const [managedIds, setManagedIds] = useState<Set<string>>(new Set())
+  const [managePropsSaving, setManagePropsSaving] = useState(false)
+  const [managePropsError, setManagePropsError] = useState<string | null>(null)
+  const [managePropsSearch, setManagePropsSearch] = useState('')
 
   const load = useCallback(async () => {
     setLoading(true)
     const supabase = createClient()
     const [portRes, propRes] = await Promise.all([
       supabase.from('portfolios').select('id, name, description, owner_llc, is_active, created_at').eq('is_active', true).order('name'),
-      supabase.from('payroll_property').select('id:property_id, appfolio_property_id, code, name, address, total_units, portfolio_id, billing_llc:owner_llc, is_active').eq('is_active', true).order('code'),
+      supabase.from('payroll_property').select('id:property_id, appfolio_property_id, code, name, address, total_units, portfolio_id, billing_llc:owner_llc, is_active, is_suppressed').eq('is_active', true).order('code'),
     ])
-    const props = propRes.data ?? []
+    // Drop operator-hidden and delete-marked rows so junk can't be assigned to a portfolio.
+    const props = (propRes.data ?? []).filter(p => !isHiddenProperty(p))
     setAllProperties(props)
 
     const portfolioList = (portRes.data ?? []).map(p => {
@@ -221,6 +237,16 @@ export default function PortfoliosPage() {
   }
 
   const unassignedProperties = allProperties.filter(p => !p.portfolio_id)
+
+  // Owner-LLC autocomplete: every LLC already in use, plus the Westend entities so a
+  // building can be moved "into Westend" in one tap even if none are assigned yet.
+  const ownerLlcOptions = useMemo(() => {
+    const set = new Set<string>()
+    for (const p of allProperties) if (p.billing_llc?.trim()) set.add(p.billing_llc.trim())
+    for (const pf of portfolios) if (pf.owner_llc?.trim()) set.add(pf.owner_llc.trim())
+    WESTEND_LLCS.forEach(x => set.add(x))
+    return Array.from(set).sort((a, b) => a.localeCompare(b))
+  }, [allProperties, portfolios])
 
   const selectedPropertyPortfolio = portfolios.find(p => p.id === propertyForm.portfolio_id)
   const fallbackOwnerLLC = selectedPropertyPortfolio?.owner_llc?.trim() ?? ''
@@ -347,6 +373,109 @@ export default function PortfoliosPage() {
     setEditForm(null)
     await load()
     setEditSaving(false)
+  }
+
+  const openEditProperty = (p: Property) => {
+    setEditPropError(null)
+    setEditPropForm({
+      id: p.id,
+      code: p.code,
+      name: p.name,
+      billing_llc: p.billing_llc ?? '',
+      portfolio_id: p.portfolio_id,
+      is_active: p.is_active,
+    })
+    setEditPropOpen(true)
+  }
+
+  const handleUpdateProperty = async () => {
+    if (!editPropForm) return
+    setEditPropError(null)
+    if (!isAdmin) { setEditPropError('Only admins can edit properties.'); return }
+
+    setEditPropSaving(true)
+    const supabase = createClient()
+    const ownerLlc = editPropForm.billing_llc.trim() || null
+    const portfolioId = editPropForm.portfolio_id || null
+    // Owner LLC + portfolio live on the curated overlay — AppFolio-proof, and what invoice
+    // grouping and the Westend spread guardrail (isWestendProperty) actually read. Mirror the
+    // portfolio onto the shared `properties` row too so other consumers stay in sync.
+    const { error: overlayErr } = await supabase
+      .from('payroll_property')
+      .update({ owner_llc: ownerLlc, portfolio_id: portfolioId, is_active: editPropForm.is_active })
+      .eq('property_id', editPropForm.id)
+    if (overlayErr) { setEditPropError(overlayErr.message); setEditPropSaving(false); return }
+    const { error: propErr } = await supabase.from('properties').update({ portfolio_id: portfolioId }).eq('id', editPropForm.id)
+    if (propErr) { setEditPropError(propErr.message); setEditPropSaving(false); return }
+
+    setEditPropOpen(false)
+    setEditPropForm(null)
+    await load()
+    setEditPropSaving(false)
+  }
+
+  const openManageProps = (p: Portfolio) => {
+    setManagePropsError(null)
+    setManagePropsSearch('')
+    setManagePortfolio(p)
+    setManagedIds(new Set(allProperties.filter(pr => pr.portfolio_id === p.id).map(pr => pr.id)))
+    setManagePropsOpen(true)
+  }
+
+  const toggleManaged = (id: string) =>
+    setManagedIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+
+  const manageFiltered = useMemo(() => {
+    const q = managePropsSearch.trim().toLowerCase()
+    if (!q) return allProperties
+    return allProperties.filter(p =>
+      (p.code ?? '').toLowerCase().includes(q) ||
+      (p.name ?? '').toLowerCase().includes(q) ||
+      (p.billing_llc ?? '').toLowerCase().includes(q)
+    )
+  }, [allProperties, managePropsSearch])
+
+  const handleSaveManageProps = async () => {
+    if (!managePortfolio) return
+    setManagePropsError(null)
+    if (!isAdmin) { setManagePropsError('Only admins can change portfolio membership.'); return }
+
+    setManagePropsSaving(true)
+    const supabase = createClient()
+    const portfolioId = managePortfolio.id
+    const before = new Set(allProperties.filter(pr => pr.portfolio_id === portfolioId).map(pr => pr.id))
+    const toAdd = [...managedIds].filter(id => !before.has(id))     // checked, not yet in this portfolio (moves them out of any other)
+    const toRemove = [...before].filter(id => !managedIds.has(id))  // were in this portfolio, now unchecked -> back to unassigned
+
+    // Mirror portfolio_id onto BOTH the shared `properties` row and the curated overlay,
+    // matching the create-portfolio flow, so grouping stays in sync everywhere.
+    try {
+      if (toAdd.length) {
+        const a = await supabase.from('properties').update({ portfolio_id: portfolioId }).in('id', toAdd)
+        if (a.error) throw a.error
+        const b = await supabase.from('payroll_property').update({ portfolio_id: portfolioId }).in('property_id', toAdd)
+        if (b.error) throw b.error
+      }
+      if (toRemove.length) {
+        const a = await supabase.from('properties').update({ portfolio_id: null }).in('id', toRemove)
+        if (a.error) throw a.error
+        const b = await supabase.from('payroll_property').update({ portfolio_id: null }).in('property_id', toRemove)
+        if (b.error) throw b.error
+      }
+    } catch (e) {
+      setManagePropsError(e instanceof Error ? e.message : 'Failed to update membership.')
+      setManagePropsSaving(false)
+      return
+    }
+
+    setManagePropsOpen(false)
+    setManagePortfolio(null)
+    await load()
+    setManagePropsSaving(false)
   }
 
   return (
@@ -655,6 +784,16 @@ export default function PortfoliosPage() {
                       {p.created_at && <span>Created {format(new Date(p.created_at), 'MMM yyyy')}</span>}
                       {isAdmin && (
                         <button
+                          onClick={e => { e.stopPropagation(); openManageProps(p) }}
+                          title="Add or remove properties"
+                          className="flex items-center gap-1 text-[var(--muted)] hover:text-[var(--primary)] transition-colors"
+                        >
+                          <Building2 size={13} />
+                          <span className="hidden sm:inline">Properties</span>
+                        </button>
+                      )}
+                      {isAdmin && (
+                        <button
                           onClick={e => { e.stopPropagation(); openEdit(p) }}
                           title="Edit portfolio"
                           className="text-[var(--muted)] hover:text-[var(--primary)] transition-colors"
@@ -666,12 +805,24 @@ export default function PortfoliosPage() {
                   </div>
                   {isOpen && props.length > 0 && (
                     <div className="border-t border-[var(--divider)] px-5 py-3">
-                      <div className="grid grid-cols-3 gap-2">
+                      <div className="grid grid-cols-2 gap-x-6 gap-y-1">
                         {props.map(prop => (
-                          <div key={prop.id} className="text-xs py-1">
-                            <span className="font-mono text-[var(--muted)] mr-1">{prop.code}</span>
-                            <span className="text-[var(--ink)]">{prop.name}</span>
-                            {prop.total_units && <span className="text-[var(--muted)] ml-1">({prop.total_units}u)</span>}
+                          <div key={prop.id} className="flex items-center gap-2 text-xs py-1">
+                            <span className="font-mono text-[var(--muted)]">{prop.code}</span>
+                            <span className="text-[var(--ink)] truncate">{prop.name}</span>
+                            {prop.total_units ? <span className="text-[var(--muted)]">({prop.total_units}u)</span> : null}
+                            <span className="ml-auto text-[10px] text-[var(--muted)] truncate max-w-[45%]" title={prop.billing_llc ?? ''}>
+                              {prop.billing_llc ?? '—'}
+                            </span>
+                            {isAdmin && (
+                              <button
+                                onClick={() => openEditProperty(prop)}
+                                title="Edit owner LLC / portfolio"
+                                className="text-[var(--muted)] hover:text-[var(--primary)] transition-colors shrink-0"
+                              >
+                                <Pencil size={11} />
+                              </button>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -685,6 +836,46 @@ export default function PortfoliosPage() {
                 </div>
               )
             })}
+          </div>
+        )}
+
+        {/* Unassigned properties — buildings not in any portfolio, still editable so their
+            owner LLC (e.g. moving one into Westend) can be set without a portfolio. */}
+        {!loading && unassignedProperties.length > 0 && (
+          <div className="mt-6">
+            <button
+              type="button"
+              onClick={() => setShowUnassigned(s => !s)}
+              className="flex items-center gap-2 text-sm text-[var(--muted)] hover:text-[var(--ink)] transition-colors"
+            >
+              {showUnassigned ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+              Unassigned properties (no portfolio) · {unassignedProperties.length}
+            </button>
+            {showUnassigned && (
+              <div className="border border-[var(--border)] bg-white mt-2 p-4">
+                <div className="grid grid-cols-2 gap-x-6 gap-y-1">
+                  {unassignedProperties.map(prop => (
+                    <div key={prop.id} className="flex items-center gap-2 text-xs py-1">
+                      <span className="font-mono text-[var(--muted)]">{prop.code}</span>
+                      <span className="text-[var(--ink)] truncate">{prop.name}</span>
+                      {prop.total_units ? <span className="text-[var(--muted)]">({prop.total_units}u)</span> : null}
+                      <span className="ml-auto text-[10px] text-[var(--muted)] truncate max-w-[45%]" title={prop.billing_llc ?? ''}>
+                        {prop.billing_llc ?? '—'}
+                      </span>
+                      {isAdmin && (
+                        <button
+                          onClick={() => openEditProperty(prop)}
+                          title="Edit owner LLC / portfolio"
+                          className="text-[var(--muted)] hover:text-[var(--primary)] transition-colors shrink-0"
+                        >
+                          <Pencil size={11} />
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -834,6 +1025,149 @@ export default function PortfoliosPage() {
             </div>
           </>
         )}
+      </Drawer>
+
+      <Drawer open={editPropOpen} onClose={() => setEditPropOpen(false)} title="Edit Property">
+        {editPropError && <InfoBlock variant="error">{editPropError}</InfoBlock>}
+
+        {editPropForm && (
+          <>
+            <div className="mb-4 text-sm">
+              <span className="font-mono text-xs text-[var(--muted)] mr-2">{editPropForm.code}</span>
+              <span className="text-[var(--ink)]">{editPropForm.name}</span>
+            </div>
+
+            <FormField
+              label="Owner LLC (Billing Entity)"
+              helperText="Drives invoice grouping. Set to a “SREP Westend …” LLC to treat this building as Westend — billed separately and excluded from the default labor spread."
+            >
+              <FormInput
+                list="owner-llc-options"
+                value={editPropForm.billing_llc}
+                onChange={e => setEditPropForm(f => f && ({ ...f, billing_llc: e.target.value }))}
+                placeholder="e.g., SREP Westend LLC"
+              />
+              <datalist id="owner-llc-options">
+                {ownerLlcOptions.map(o => <option key={o} value={o} />)}
+              </datalist>
+            </FormField>
+
+            <div className="flex flex-wrap gap-1.5 -mt-2 mb-4">
+              <span className="text-[11px] text-[var(--muted)] mr-1 self-center">Quick set Westend:</span>
+              {WESTEND_LLCS.map(llc => (
+                <button
+                  key={llc}
+                  type="button"
+                  onClick={() => setEditPropForm(f => f && ({ ...f, billing_llc: llc }))}
+                  className={`text-[11px] border px-2 py-0.5 transition-colors ${
+                    editPropForm.billing_llc === llc
+                      ? 'border-[var(--primary)] bg-[var(--primary)]/10 text-[var(--primary)]'
+                      : 'border-[var(--border)] text-[var(--muted)] hover:bg-[var(--bg-section)] hover:text-[var(--ink)]'
+                  }`}
+                >
+                  {llc.replace('SREP ', '')}
+                </button>
+              ))}
+            </div>
+
+            <FormField label="Portfolio">
+              <FormSelect
+                value={editPropForm.portfolio_id ?? ''}
+                onChange={e => setEditPropForm(f => f && ({ ...f, portfolio_id: e.target.value || null }))}
+              >
+                <option value="">— Unassigned —</option>
+                {portfolios.map(port => (
+                  <option key={port.id} value={port.id}>{port.name}</option>
+                ))}
+              </FormSelect>
+            </FormField>
+
+            <label className="flex items-center gap-2 text-sm cursor-pointer mb-4">
+              <input
+                type="checkbox"
+                checked={editPropForm.is_active}
+                onChange={e => setEditPropForm(f => f && ({ ...f, is_active: e.target.checked }))}
+                className="w-4 h-4 rounded-none"
+              />
+              Active
+            </label>
+
+            <div className="flex gap-2 pt-4 border-t border-[var(--divider)]">
+              <FormButton onClick={handleUpdateProperty} loading={editPropSaving} fullWidth>
+                Save Changes
+              </FormButton>
+              <FormButton variant="ghost" onClick={() => setEditPropOpen(false)}>Cancel</FormButton>
+            </div>
+          </>
+        )}
+      </Drawer>
+
+      <Drawer
+        open={managePropsOpen}
+        onClose={() => setManagePropsOpen(false)}
+        title={managePortfolio ? `Properties — ${managePortfolio.name}` : 'Properties'}
+      >
+        {managePropsError && <InfoBlock variant="error">{managePropsError}</InfoBlock>}
+        <p className="text-xs text-[var(--muted)] mb-3">
+          Tick the buildings that belong to this portfolio. Unticking one makes it unassigned (it is
+          not deleted). A property lives in only one portfolio — ticking it here moves it out of its
+          current one.
+        </p>
+
+        <FormInput
+          value={managePropsSearch}
+          onChange={e => setManagePropsSearch(e.target.value)}
+          placeholder="Search code, name, or owner LLC…"
+          className="mb-2"
+        />
+
+        <div className="flex items-center justify-between text-xs text-[var(--muted)] mb-2">
+          <span><span className="font-medium text-[var(--ink)]">{managedIds.size}</span> selected</span>
+          <div className="flex gap-3">
+            <button type="button" className="text-[var(--primary)] hover:underline"
+              onClick={() => setManagedIds(prev => { const n = new Set(prev); manageFiltered.forEach(p => n.add(p.id)); return n })}>
+              Select shown
+            </button>
+            <button type="button" className="hover:underline"
+              onClick={() => setManagedIds(prev => { const n = new Set(prev); manageFiltered.forEach(p => n.delete(p.id)); return n })}>
+              Clear shown
+            </button>
+          </div>
+        </div>
+
+        <div className="border border-[var(--border)] max-h-[55vh] overflow-y-auto">
+          {manageFiltered.length === 0 ? (
+            <div className="p-3 text-xs text-[var(--muted)]">No matching properties.</div>
+          ) : manageFiltered.map((p, i) => {
+            const checked = managedIds.has(p.id)
+            const otherPortfolio = p.portfolio_id && p.portfolio_id !== managePortfolio?.id
+              ? portfolios.find(x => x.id === p.portfolio_id)
+              : null
+            return (
+              <label
+                key={p.id}
+                className={`flex items-center gap-2 px-3 py-1.5 text-xs cursor-pointer border-b border-[var(--divider)] last:border-0 ${i % 2 ? 'bg-[var(--bg-section)]' : 'bg-white'}`}
+              >
+                <input type="checkbox" checked={checked} onChange={() => toggleManaged(p.id)} className="w-3.5 h-3.5 rounded-none shrink-0" />
+                <span className="font-mono text-[var(--muted)]">{p.code}</span>
+                <span className="text-[var(--ink)] truncate">{p.name}</span>
+                {p.billing_llc && <span className="text-[10px] text-[var(--muted)] truncate max-w-[30%]" title={p.billing_llc}>· {p.billing_llc}</span>}
+                {otherPortfolio && (
+                  <span className="ml-auto text-[10px] text-[var(--warning)] truncate max-w-[35%] shrink-0" title={`Currently in ${otherPortfolio.name}`}>
+                    in {otherPortfolio.name}
+                  </span>
+                )}
+              </label>
+            )
+          })}
+        </div>
+
+        <div className="flex gap-2 pt-4 border-t border-[var(--divider)] mt-4">
+          <FormButton onClick={handleSaveManageProps} loading={managePropsSaving} fullWidth>
+            Save Membership
+          </FormButton>
+          <FormButton variant="ghost" onClick={() => setManagePropsOpen(false)}>Cancel</FormButton>
+        </div>
       </Drawer>
     </div>
   )

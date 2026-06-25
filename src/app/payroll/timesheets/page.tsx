@@ -266,7 +266,7 @@ function TimesheetsPageContent() {
           Loading…
         </div>
       ) : (
-        <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-1 overflow-hidden min-h-0">
           {/* Employee switcher */}
           <EmployeeSwitcher
             employees={employees}
@@ -277,7 +277,7 @@ function TimesheetsPageContent() {
           />
 
           {/* Main content */}
-          <div className="flex-1 overflow-auto">
+          <div className="flex-1 overflow-auto min-w-0">
             {!selectedEmployeeId ? (
               <div className="flex items-center justify-center h-40 text-[var(--muted)] text-sm">
                 Select an employee

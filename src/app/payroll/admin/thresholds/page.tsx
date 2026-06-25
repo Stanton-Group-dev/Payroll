@@ -45,7 +45,7 @@ export default function ThresholdsPage() {
     setLoading(true)
     const supabase = createClient()
     const [propRes, portRes, threshRes] = await Promise.all([
-      supabase.from('properties').select('id, code, name, total_units, portfolio_id').eq('is_active', true).order('code'),
+      supabase.from('payroll_property').select('id:property_id, code, name, total_units, portfolio_id, is_suppressed').eq('is_active', true).order('code'),
       supabase.from('portfolios').select('id, name').eq('is_active', true).order('name'),
       supabase.from('payroll_property_thresholds').select('id, property_id, threshold_per_unit, effective_date').order('effective_date', { ascending: false }),
     ])
@@ -62,7 +62,7 @@ export default function ThresholdsPage() {
       }
     }
 
-    const rows: PropertyRow[] = (propRes.data ?? []).map(p => ({
+    const rows: PropertyRow[] = (propRes.data ?? []).filter(p => !p.is_suppressed).map(p => ({
       id: p.id,
       code: p.code,
       name: p.name,

@@ -52,10 +52,11 @@ export default function PropertyDrilldownPage({ params }: { params: Promise<{ pr
       const supabase = createClient()
 
       const [propRes, costsRes, threshRes] = await Promise.all([
+        // Curated overlay so operator-suppressed buildings don't render even via deep link.
         supabase
-          .from('properties')
-          .select('id, code, name, total_units, portfolio_id, address')
-          .eq('id', propertyId)
+          .from('payroll_property')
+          .select('id:property_id, code, name, total_units, portfolio_id, address, is_suppressed')
+          .eq('property_id', propertyId)
           .single(),
         supabase
           .from('payroll_weekly_property_costs')
@@ -74,7 +75,7 @@ export default function PropertyDrilldownPage({ params }: { params: Promise<{ pr
         setThreshold(Number(threshRes.data[0].threshold_per_unit))
       }
 
-      if (propRes.data) {
+      if (propRes.data && !propRes.data.is_suppressed) {
         const prop = propRes.data
         let portfolioName: string | null = null
         if (prop.portfolio_id) {

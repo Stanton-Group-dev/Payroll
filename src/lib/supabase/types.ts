@@ -407,6 +407,11 @@ export interface Property {
    *  every query selects it; absence is treated as included. See migration
    *  20260617_02_invoicing_inclusion_flags. */
   include_in_invoicing?: boolean
+  /** Operator "hide everywhere" flag (payroll_property.is_suppressed). When true the
+   *  property is dropped from every payroll surface — pickers, review, invoices, totals,
+   *  analytics — via isHiddenProperty()/isNonBillableProperty(). Optional because not
+   *  every query selects it; absence is treated as visible. Migration 20260624_02. */
+  is_suppressed?: boolean
 }
 
 export interface Portfolio {

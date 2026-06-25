@@ -37,6 +37,7 @@ import {
   LayoutDashboard,
   Wand2,
   ClipboardList,
+  EyeOff,
   type LucideIcon,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/payroll/useAuth'
@@ -87,6 +88,7 @@ const settingsItems: Item[] = [
   { href: '/payroll/admin/mgmt-fee', label: 'Management Fee', icon: Settings },
   { href: '/payroll/admin/portfolios', label: 'Portfolios', icon: Briefcase },
   { href: '/payroll/admin/invoicing', label: 'Billed Properties', icon: SlidersHorizontal },
+  { href: '/payroll/admin/suppression', label: 'Hidden Items', icon: EyeOff },
   { href: '/payroll/admin/travel-premiums', label: 'Travel Premiums', icon: Plane },
   { href: '/payroll/admin/mileage-rate', label: 'Mileage Rate', icon: CircleDollarSign },
   { href: '/payroll/admin/thresholds', label: 'Budget Thresholds', icon: Target },

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { isDeleteMarked, isWestendProperty } from '@/lib/payroll/properties'
+import { isHiddenProperty, isWestendProperty } from '@/lib/payroll/properties'
 
 export interface PropertyOption {
   id: string
@@ -23,12 +23,12 @@ export function useProperties(activeOnly = true) {
     const supabase = createClient()
     // Read from the curated payroll_property overlay (owner_llc -> billing_llc, property_id -> id)
     // so pickers reflect manual corrections, not the AppFolio-synced `properties` table.
-    let query = supabase.from('payroll_property').select('id:property_id, code, name, billing_llc:owner_llc').order('code')
+    let query = supabase.from('payroll_property').select('id:property_id, code, name, billing_llc:owner_llc, is_suppressed').order('code')
     if (activeOnly) query = query.eq('is_active', true)
     const { data, error: err } = await query
     if (err) setError(err.message)
     const options: PropertyOption[] = (data ?? [])
-      .filter(p => !isDeleteMarked(p))
+      .filter(p => !isHiddenProperty(p))
       .map(p => ({ ...p, isWestend: isWestendProperty(p) }))
     setProperties(options)
     setLoading(false)

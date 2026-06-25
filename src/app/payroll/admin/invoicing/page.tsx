@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { ChevronRight, ChevronDown, Briefcase, Building2, AlertTriangle } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { useAuth } from '@/hooks/payroll/useAuth'
-import { isDeleteMarked } from '@/lib/payroll/properties'
+import { isHiddenProperty } from '@/lib/payroll/properties'
 import { PageHeader, InfoBlock, SectionDivider, Toggle } from '@/components/form'
 
 interface Portfolio {
@@ -40,7 +40,7 @@ export default function InvoicingSettingsPage() {
     const [portRes, propRes] = await Promise.all([
       supabase.from('portfolios').select('id, name, include_in_invoicing').eq('is_active', true).order('name'),
       supabase.from('payroll_property')
-        .select('id:property_id, code, name, total_units, portfolio_id, billing_llc:owner_llc, include_in_invoicing')
+        .select('id:property_id, code, name, total_units, portfolio_id, billing_llc:owner_llc, include_in_invoicing, is_suppressed')
         .eq('is_active', true).order('code'),
     ])
     if (portRes.error || propRes.error) {
@@ -51,7 +51,7 @@ export default function InvoicingSettingsPage() {
     setPortfolios((portRes.data ?? []).map(p => ({ ...p, include_in_invoicing: p.include_in_invoicing ?? true })))
     setProperties(
       (propRes.data ?? [])
-        .filter(p => !isDeleteMarked(p))
+        .filter(p => !isHiddenProperty(p))
         .map(p => ({ ...p, include_in_invoicing: p.include_in_invoicing ?? true })),
     )
     setLoading(false)

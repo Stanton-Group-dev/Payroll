@@ -70,9 +70,11 @@ export default function AnalyticsPage() {
           .from('payroll_weekly_property_costs')
           .select('payroll_week_id, property_id, total_cost, cost_per_unit')
           .order('payroll_week_id', { ascending: false }),
+        // Curated overlay (not raw `properties`) so operator-suppressed buildings are
+        // dropped from analytics too. is_suppressed filtered out below.
         supabase
-          .from('properties')
-          .select('id, code, name, total_units, portfolio_id')
+          .from('payroll_property')
+          .select('id:property_id, code, name, total_units, portfolio_id, is_suppressed')
           .eq('is_active', true),
         supabase
           .from('portfolios')
@@ -89,7 +91,7 @@ export default function AnalyticsPage() {
       ])
 
       const costs = costsRes.data ?? []
-      const properties = propsRes.data ?? []
+      const properties = (propsRes.data ?? []).filter(p => !p.is_suppressed)
       const portfolios = portsRes.data ?? []
       const weeks = weeksRes.data ?? []
 

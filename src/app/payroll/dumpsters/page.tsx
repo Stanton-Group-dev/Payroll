@@ -82,17 +82,20 @@ export default function DumpstersPage() {
     setLoading(true)
     const supabase = createClient()
 
-    const [propRes, portRes] = await Promise.all([
+    const [propRes, portRes, hiddenRes] = await Promise.all([
       supabase.from('properties')
         .select('id, code, name, total_units, workyard_project_id, portfolio_id')
         .eq('is_active', true).order('code'),
       supabase.from('portfolios').select('id, name'),
+      // Operator-hidden properties (Admin → Hidden Items) — dropped from the report below.
+      supabase.from('payroll_property').select('property_id').eq('is_suppressed', true),
     ])
 
     const portMap: Record<string, string> = {}
     for (const p of (portRes.data ?? [])) portMap[p.id] = p.name
+    const hidden = new Set((hiddenRes.data ?? []).map(r => r.property_id))
 
-    setProperties((propRes.data ?? []).map(p => ({
+    setProperties((propRes.data ?? []).filter(p => !hidden.has(p.id)).map(p => ({
       id: p.id,
       code: p.code,
       name: p.name,

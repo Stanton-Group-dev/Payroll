@@ -25,7 +25,7 @@ export const WESTEND_BILLING_LLC = 'SREP Westend LLC'
 
 /** Columns to select from payroll_property so a row maps straight via curatedToProperty(). */
 export const CURATED_PROPERTY_COLUMNS =
-  'property_id, appfolio_property_id, code, name, address, total_units, portfolio_id, owner_llc, include_in_invoicing, is_active'
+  'property_id, appfolio_property_id, code, name, address, total_units, portfolio_id, owner_llc, include_in_invoicing, is_active, is_suppressed'
 
 /** Raw row shape returned by selecting CURATED_PROPERTY_COLUMNS from payroll_property. */
 export interface CuratedPropertyRow {
@@ -39,6 +39,7 @@ export interface CuratedPropertyRow {
   owner_llc: string | null
   include_in_invoicing: boolean
   is_active: boolean
+  is_suppressed: boolean
 }
 
 /** Map a curated payroll_property row into the `Property` shape the payroll app consumes. */
@@ -54,6 +55,7 @@ export function curatedToProperty(r: CuratedPropertyRow): Property {
     billing_llc: r.owner_llc,
     is_active: r.is_active,
     include_in_invoicing: r.include_in_invoicing,
+    is_suppressed: r.is_suppressed,
   }
 }
 
@@ -61,6 +63,8 @@ export interface PropertyMarkers {
   code?: string | null
   name?: string | null
   billing_llc?: string | null
+  /** Operator "hide everywhere" flag from payroll_property.is_suppressed. */
+  is_suppressed?: boolean | null
 }
 
 /** True when a property is tagged for deletion via the `delete…`/`zz …` naming convention. */
@@ -77,6 +81,25 @@ export function isDeleteMarked(p: PropertyMarkers): boolean {
 }
 
 /**
+ * True when an operator has manually hidden this property via the Admin → Hidden Items
+ * screen (payroll_property.is_suppressed). The data-driven counterpart to isDeleteMarked:
+ * for junk/duplicate AppFolio rows that can't be deleted and ex-customers we no longer
+ * serve, when there's nothing wrong with the *name* to key off.
+ */
+export function isSuppressed(p: PropertyMarkers): boolean {
+  return p.is_suppressed === true
+}
+
+/**
+ * True for any property that must NOT appear in pickers, dropdowns, or browse lists:
+ * the delete-marked naming convention OR an operator suppression. Use this (not the raw
+ * isDeleteMarked) for every property *picker* so suppressions are honored everywhere.
+ */
+export function isHiddenProperty(p: PropertyMarkers): boolean {
+  return isSuppressed(p) || isDeleteMarked(p)
+}
+
+/**
  * True for any property that must NEVER appear on a customer invoice — the
  * delete-marked rows (above) plus the test/placeholder scaffolding that the
  * AppFolio import keeps re-creating ("000 - Test Property", "… Test …").
@@ -87,6 +110,7 @@ export function isDeleteMarked(p: PropertyMarkers): boolean {
  * the invoicing and review paths gate on this regardless of the flag.
  */
 export function isNonBillableProperty(p: PropertyMarkers): boolean {
+  if (isSuppressed(p)) return true
   if (isDeleteMarked(p)) return true
   const code = (p.code ?? '').trim().toLowerCase()
   const name = (p.name ?? '').trim().toLowerCase()

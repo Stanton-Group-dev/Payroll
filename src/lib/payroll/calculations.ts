@@ -169,6 +169,13 @@ export function calculatePayroll(
     otThresholdHours?: number
   }
 ): PayrollCalculationResult {
+  // Operator-suppressed properties (Admin → Hidden Items) are dropped entirely: no cost
+  // row, no spread, no management fee, nothing in any total — as if they never existed.
+  // Employees are still PAID for hours logged against them (employee summaries are
+  // property-agnostic, computed from raw time entries below); the cost just isn't billed
+  // to anyone. This is the single calc-boundary chokepoint, so every caller (review,
+  // invoices, ADP, command bar) inherits it.
+  properties = properties.filter(p => !p.is_suppressed)
   const effectivePayrollTaxRate   = settings?.payrollTaxRate    ?? PAYROLL_TAX_RATE
   const effectiveWorkersCompRate  = settings?.workersCompRate   ?? WORKERS_COMP_RATE
   const effectivePhoneAmount      = settings?.phoneAmount       ?? PHONE_REIMBURSEMENT_AMOUNT
