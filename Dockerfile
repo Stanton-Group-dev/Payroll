@@ -1,8 +1,9 @@
 # Payroll — Railway deploy (Vercel → Railway consolidation, 2026-06-24).
 # Multi-stage; emits Next.js standalone output. Secrets come from Railway's env panel at
 # runtime — only the PUBLIC NEXT_PUBLIC_* client config is needed at build time (Next inlines
-# every NEXT_PUBLIC_* at `next build`). Base is debian-slim (not alpine) because the PDF route
-# (/api/payroll/pdf) ships @sparticuz/chromium, which needs glibc, not musl.
+# every NEXT_PUBLIC_* at `next build`). Base is debian-slim (not alpine) so the PDF route
+# (/api/payroll/pdf) can run Debian's `chromium` (glibc, not musl). The runner installs that
+# Chromium via apt and points puppeteer-core at it with PUPPETEER_EXECUTABLE_PATH.
 
 # ---- deps ---------------------------------------------------------------------------------------
 FROM node:20-slim AS deps
@@ -38,6 +39,14 @@ ENV NEXT_TELEMETRY_DISABLED=1
 # container ID, so without this it listens on an interface Railway's proxy can't reach → 502.
 ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
+
+# Headless Chromium for the PDF route (/api/payroll/pdf). apt resolves all of Chromium's
+# shared-lib dependencies automatically, so this is more reliable in a long-running container
+# than the serverless @sparticuz build. pdf.ts launches this via PUPPETEER_EXECUTABLE_PATH.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends chromium fonts-liberation ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium
 
 RUN groupadd --system --gid 1001 nodejs \
   && useradd --system --uid 1001 --gid nodejs nextjs

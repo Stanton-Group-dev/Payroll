@@ -8,13 +8,30 @@ import puppeteer, { type Browser } from 'puppeteer-core'
  * Supabase session cookies into headless Chrome before navigating — the rendered
  * page sees the same authenticated user and the same data the analyst would.
  *
- * Local dev uses the Chrome already installed on the machine (`channel: 'chrome'`);
- * on Vercel/Lambda we use the bundled @sparticuz/chromium binary.
+ * Three launch paths, in priority order:
+ *   1. A system Chromium pointed to by PUPPETEER_EXECUTABLE_PATH — this is the production
+ *      container path (Railway installs Debian's `chromium` and sets the env var). Most
+ *      reliable in a long-running container: apt pulls every shared-lib dependency.
+ *   2. AWS Lambda / Vercel — the bundled @sparticuz/chromium binary.
+ *   3. Local dev — the Chrome already installed on the machine (`channel: 'chrome'`).
  */
 
 const isServerless = !!process.env.AWS_LAMBDA_FUNCTION_NAME || !!process.env.VERCEL
 
 async function launch(): Promise<Browser> {
+  // (1) Production container with a system Chromium (Railway).
+  const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH
+  if (executablePath) {
+    return puppeteer.launch({
+      executablePath,
+      // --no-sandbox is required when Chromium runs as a non-root user in a container with no
+      // user namespaces; --disable-dev-shm-usage avoids crashes on the small /dev/shm there.
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage'],
+      defaultViewport: { width: 1280, height: 1696 },
+      headless: true,
+    })
+  }
+  // (2) Serverless (AWS Lambda / Vercel): bundled chromium.
   if (isServerless) {
     const chromium = (await import('@sparticuz/chromium')).default
     return puppeteer.launch({
@@ -24,7 +41,7 @@ async function launch(): Promise<Browser> {
       headless: true,
     })
   }
-  // Local: drive the system Chrome install (no bundled download).
+  // (3) Local: drive the system Chrome install (no bundled download).
   return puppeteer.launch({ channel: 'chrome', headless: true })
 }
 
