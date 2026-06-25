@@ -17,6 +17,7 @@ import Link from 'next/link'
 import { ArrowLeft, Download, Loader2 } from 'lucide-react'
 import { useInvoiceBuild } from '@/hooks/payroll/useInvoiceBuild'
 import { formatCurrency } from '@/lib/payroll/calculations'
+import { compareLlcOrder } from '@/lib/payroll/llcOrder'
 import { downloadPdf } from '@/lib/payroll/downloadPdf'
 
 export default function StatementPrintPage({ params }: { params: Promise<{ weekId: string }> }) {
@@ -38,8 +39,8 @@ export default function StatementPrintPage({ params }: { params: Promise<{ weekI
   if (loading) return <div className="p-8 text-[var(--muted)]">Loading…</div>
   if (error) return <div className="p-8 text-[var(--error)]">Failed to load: {error}</div>
 
-  // Statement summary — each LLC and its amount, biggest first.
-  const llcRows = [...invoices].sort((a, b) => b.total - a.total)
+  // Statement summary — each LLC and its amount, in the fixed canonical order.
+  const llcRows = [...invoices].sort((a, b) => compareLlcOrder(a.llc, b.llc))
   const grand = llcRows.reduce((s, i) => s + i.total, 0)
 
   // On-site hourly summary — exclude remote-run employees.

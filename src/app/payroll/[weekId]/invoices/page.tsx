@@ -7,6 +7,7 @@ import { usePayrollWeekInvoices } from '@/hooks/payroll/usePayrollWeekInvoices'
 import { usePayrollInvoices } from '@/hooks/payroll/usePayrollInvoices'
 import { PageHeader, FormButton, InfoBlock, StatusBadge } from '@/components/form'
 import { formatCurrency } from '@/lib/payroll/calculations'
+import { compareLlcOrder } from '@/lib/payroll/llcOrder'
 
 export default function InvoicesPage({ params }: { params: Promise<{ weekId: string }> }) {
   const { weekId } = use(params)
@@ -72,7 +73,7 @@ export default function InvoicesPage({ params }: { params: Promise<{ weekId: str
           </div>
         ) : (
           <div className="space-y-3">
-            {invoices.map(inv => (
+            {[...invoices].sort((a, b) => compareLlcOrder(a.owner_llc, b.owner_llc)).map(inv => (
               <div key={inv.id} className="border border-[var(--border)] bg-white">
                 <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--divider)]">
                   <div className="flex items-center gap-3">

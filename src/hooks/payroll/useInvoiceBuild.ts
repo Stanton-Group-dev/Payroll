@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { usePayrollWeekReview } from './usePayrollWeekReview'
 import { calculatePayroll, SPREAD_OTHER_DEPT, type EmployeePaySummary } from '@/lib/payroll/calculations'
+import { compareLlcOrder } from '@/lib/payroll/llcOrder'
 import type { WorkyardRow } from '@/lib/payroll/csv-parser'
 
 /** Map a (Spanish / old / pickup) cost-code name to a clean English activity for the customer. */
@@ -168,7 +169,7 @@ export function useInvoiceBuild(weekId: string) {
       amount: props.reduce((s, p) => s + p.labor_cost + p.spread_cost + p.mileage_cost + p.expense_cost + p.tax_cost + p.wc_cost, 0),
       mgmt: props.reduce((s, p) => s + p.mgmt_fee, 0),
       total: props.reduce((s, p) => s + p.total_cost, 0),
-    })).sort((a, b) => b.total - a.total)
+    })).sort((a, b) => compareLlcOrder(a.llc, b.llc))
 
     return { invoices, employeeSummaries: calc.employee_summaries }
   }, [review.loading, review.employees, review.entries, review.adjustments, review.feeConfigs,
