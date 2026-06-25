@@ -11,6 +11,7 @@ import {
   PageHeader, FormButton, FormSelect, FormField, FormInput,
   FormTextarea, InfoBlock, StatusBadge, SectionDivider, Drawer,
 } from '@/components/form'
+import { ReopenWeekButton } from '@/components/payroll/ReopenWeekButton'
 import { formatCurrency } from '@/lib/payroll/calculations'
 import type { AdjustmentType, AllocationMethod } from '@/lib/supabase/types'
 import { format } from 'date-fns'
@@ -153,8 +154,9 @@ function AdjustmentsPageContent() {
           <InfoBlock variant="warning" title="Payroll Locked">
             <div className="flex items-center gap-1.5">
               <Lock size={13} />
-              Adjustments are read-only after payroll approval. No changes permitted.
+              Adjustments are read-only after payroll approval. Reopen the week (admin) to make changes.
             </div>
+            <ReopenWeekButton weekId={selectedWeek!.id} onReopened={() => window.location.reload()} />
           </InfoBlock>
         )}
 

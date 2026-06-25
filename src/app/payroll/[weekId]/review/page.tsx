@@ -8,6 +8,7 @@ import { calculatePayroll, resolveRateAsOf, formatCurrency, SPREAD_OTHER_DEPT, t
 import { PayrollComparisonPanel } from '@/components/payroll/PayrollComparisonPanel'
 import { ManualReconcilePanel } from '@/components/payroll/ManualReconcilePanel'
 import { UnallocatedHoldsPanel } from '@/components/payroll/UnallocatedHoldsPanel'
+import { ReopenWeekButton } from '@/components/payroll/ReopenWeekButton'
 
 type EmpCol = {
   key: keyof EmployeePaySummary
@@ -180,6 +181,7 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
                 Go to Invoice Generator →
               </a>
             </div>
+            <ReopenWeekButton weekId={weekId} onReopened={refetch} />
           </InfoBlock>
         )}
 
