@@ -9,6 +9,7 @@ import type {
   Property,
 } from '@/lib/supabase/types'
 import { PAYROLL_TAX_RATE, WORKERS_COMP_RATE, PHONE_REIMBURSEMENT_AMOUNT, DEFAULT_MILEAGE_RATE } from '@/lib/payroll/config'
+import { compareLlcOrder } from '@/lib/payroll/llcOrder'
 
 /**
  * Given an employee's rate history and a week start date, return the rate
@@ -66,6 +67,9 @@ export interface PropertyCostSummary {
   property_code: string
   property_name: string
   portfolio_id: string | null
+  /** Billing LLC (curated owner_llc) this property invoices to — the axis Stanton bills on,
+   *  used to roll costs up by LLC in comparePayroll. */
+  billing_llc?: string | null
   total_units: number
   labor_cost: number
   spread_cost: number
@@ -600,6 +604,7 @@ export function calculatePayroll(
       property_code: prop.code,
       property_name: prop.name,
       portfolio_id: prop.portfolio_id,
+      billing_llc: prop.billing_llc ?? null,
       total_units: prop.total_units ?? 0,
       labor_cost: round2(labor),
       spread_cost: round2(spread),
@@ -707,9 +712,9 @@ export interface PayrollComparison {
   }
   byEmployee: ComparisonRow[]
   byProperty: ComparisonRow[]
-  /** Per-portfolio total-cost & cost-per-unit deltas, each expandable to its buildings.
-   *  Empty unless the portfolio roster is supplied to comparePayroll(). */
-  byPortfolio: CostCompareRow[]
+  /** Per-billing-LLC total-cost & cost-per-unit deltas, each expandable to its buildings.
+   *  Ordered by the canonical statement order (this is the axis Stanton invoices on). */
+  byLlc: CostCompareRow[]
   /** Plain-language highlights, suitable for an agent to read back. */
   notable: string[]
 }
@@ -771,39 +776,38 @@ function costCompareRow(
   }
 }
 
-const UNASSIGNED_PORTFOLIO = '__unassigned__'
+const UNASSIGNED_LLC = '__unassigned__'
 
 /**
- * Roll the per-property costs up to the portfolio level for both weeks. The
- * denominator for cost-per-unit is the portfolio's full active-unit count (every
- * active property is present in property_costs, even at zero cost), so it's stable
- * week to week. Buildings with no cost in either week are dropped from the expand
- * list but still count toward the portfolio's unit total.
+ * Roll the per-property costs up to the BILLING LLC level for both weeks — the axis Stanton
+ * actually invoices on (not the AppFolio portfolio, which can lump several LLCs together). The
+ * cost-per-unit denominator is the LLC's full active-unit count (every active property is in
+ * property_costs, even at zero cost), so it's stable week to week. Buildings with no cost in
+ * either week drop off the expand list but still count toward the LLC's unit total. Rows are
+ * ordered by the canonical statement order.
  */
-function buildPortfolioComparison(
+function buildLlcComparison(
   current: PayrollCalculationResult,
   prior: PayrollCalculationResult,
-  portfolios: { id: string; name: string }[]
 ): CostCompareRow[] {
-  const nameOf = new Map(portfolios.map((p) => [p.id, p.name]))
   const propCur = new Map(current.property_costs.map((p) => [p.property_id, p]))
   const propPri = new Map(prior.property_costs.map((p) => [p.property_id, p]))
   const allPropIds = new Set([...propCur.keys(), ...propPri.keys()])
 
-  // Group property ids by portfolio, accumulating the portfolio's full unit count.
+  // Group property ids by billing LLC, accumulating the LLC's full unit count.
   const groups = new Map<string, { units: number; propIds: string[] }>()
   for (const id of allPropIds) {
     const meta = propCur.get(id) ?? propPri.get(id)!
-    const pid = meta.portfolio_id ?? UNASSIGNED_PORTFOLIO
+    const llc = (meta.billing_llc && meta.billing_llc.trim()) || UNASSIGNED_LLC
     const units = propCur.get(id)?.total_units ?? propPri.get(id)?.total_units ?? 0
-    const g = groups.get(pid) ?? { units: 0, propIds: [] }
+    const g = groups.get(llc) ?? { units: 0, propIds: [] }
     g.units += units
     g.propIds.push(id)
-    groups.set(pid, g)
+    groups.set(llc, g)
   }
 
   const rows: CostCompareRow[] = []
-  for (const [pid, g] of groups) {
+  for (const [llc, g] of groups) {
     let curTotal = 0
     let priTotal = 0
     const children: CostCompareRow[] = []
@@ -821,17 +825,19 @@ function buildPortfolioComparison(
     }
     if (curTotal === 0 && priTotal === 0) continue
     children.sort((a, b) => b.current - a.current || b.prior - a.prior)
-    const label = pid === UNASSIGNED_PORTFOLIO ? 'Unassigned (no portfolio)' : nameOf.get(pid) ?? pid
-    rows.push(costCompareRow(pid, label, curTotal, priTotal, g.units, children))
+    const label = llc === UNASSIGNED_LLC ? 'Unassigned (no LLC)' : llc
+    rows.push(costCompareRow(llc, label, curTotal, priTotal, g.units, children))
   }
-  return rows.sort((a, b) => b.current - a.current || b.prior - a.prior)
+  return rows.sort((a, b) => compareLlcOrder(a.label, b.label))
 }
 
 export function comparePayroll(
   current: PayrollCalculationResult,
   prior: PayrollCalculationResult,
   labels: { current: string; prior: string },
-  portfolios: { id: string; name: string }[] = []
+  /** Deprecated/unused: rollups now group by billing LLC (the LLC name is the label), not by
+   *  the portfolio roster. Kept in the signature so existing positional callers don't break. */
+  _portfolios: { id: string; name: string }[] = []
 ): PayrollComparison {
   // Per-employee gross, keyed by id across both weeks.
   const empCur = new Map(current.employee_summaries.map((e) => [e.employee_id, e]))
@@ -909,7 +915,7 @@ export function comparePayroll(
     )
   }
 
-  const byPortfolio = buildPortfolioComparison(current, prior, portfolios)
+  const byLlc = buildLlcComparison(current, prior)
 
   return {
     currentLabel: labels.current,
@@ -917,7 +923,7 @@ export function comparePayroll(
     totals,
     byEmployee,
     byProperty,
-    byPortfolio,
+    byLlc,
     notable,
   }
 }

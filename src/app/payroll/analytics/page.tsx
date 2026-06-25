@@ -6,6 +6,7 @@ import { TrendingUp, TrendingDown, Minus, AlertTriangle, Building2 } from 'lucid
 import { createClient } from '@/lib/supabase/client'
 import { PageHeader, StatusBadge } from '@/components/form'
 import { formatCurrency } from '@/lib/payroll/calculations'
+import { compareLlcOrder } from '@/lib/payroll/llcOrder'
 import {
   ResponsiveContainer,
   BarChart,
@@ -23,6 +24,7 @@ interface PropertyRow {
   property_name: string
   portfolio_id: string | null
   portfolio_name: string | null
+  billing_llc: string | null
   total_units: number
   weeks: { week_start: string; cost_per_unit: number; total_cost: number }[]
   current_cost_per_unit: number
@@ -74,7 +76,7 @@ export default function AnalyticsPage() {
         // dropped from analytics too. is_suppressed filtered out below.
         supabase
           .from('payroll_property')
-          .select('id:property_id, code, name, total_units, portfolio_id, is_suppressed')
+          .select('id:property_id, code, name, total_units, portfolio_id, is_suppressed, billing_llc:owner_llc')
           .eq('is_active', true),
         supabase
           .from('portfolios')
@@ -144,6 +146,7 @@ export default function AnalyticsPage() {
           property_name: prop.name,
           portfolio_id: prop.portfolio_id,
           portfolio_name: prop.portfolio_id ? (portNameMap[prop.portfolio_id] ?? null) : null,
+          billing_llc: prop.billing_llc ?? null,
           total_units: prop.total_units ?? 0,
           weeks: propWeeks.slice(0, 8).reverse(),
           current_cost_per_unit: current.cost_per_unit,
@@ -178,10 +181,13 @@ export default function AnalyticsPage() {
     })
   }, [propertyRows, portfolioFilter, sortKey, sortDir])
 
+  // Grouped by BILLING LLC (how Stanton invoices), not the AppFolio portfolio — so each SREP
+  // Park N LLC is its own row and nothing rolls up under the "Stanton Management" catch-all.
+  // (The PortfolioRow shape is reused; portfolio_id/portfolio_name carry the LLC key/name.)
   const portfolioRows = useMemo<PortfolioRow[]>(() => {
     const map: Record<string, PropertyRow[]> = {}
     for (const r of propertyRows) {
-      const key = r.portfolio_id ?? '__none__'
+      const key = (r.billing_llc && r.billing_llc.trim()) || '__none__'
       if (!map[key]) map[key] = []
       map[key].push(r)
     }
@@ -204,7 +210,7 @@ export default function AnalyticsPage() {
 
       return {
         portfolio_id: key === '__none__' ? null : key,
-        portfolio_name: rows[0].portfolio_name ?? 'Unassigned',
+        portfolio_name: key === '__none__' ? 'Unassigned (no LLC)' : key,
         property_count: rows.length,
         total_units: totalUnits,
         current_total_cost: totalCost,
@@ -212,7 +218,7 @@ export default function AnalyticsPage() {
         prior_avg_cost_per_unit: priorAvgCpu,
         delta_pct: delta,
       }
-    }).sort((a, b) => b.current_total_cost - a.current_total_cost)
+    }).sort((a, b) => compareLlcOrder(a.portfolio_name, b.portfolio_name))
   }, [propertyRows])
 
   const toggleSort = (key: typeof sortKey) => {
@@ -243,7 +249,7 @@ export default function AnalyticsPage() {
                 onClick={() => setViewMode('portfolio')}
                 className={`px-3 py-1.5 text-xs font-medium transition-colors border-l border-[var(--border)] ${viewMode === 'portfolio' ? 'bg-[var(--primary)] text-white' : 'bg-white text-[var(--muted)] hover:text-[var(--ink)]'}`}
               >
-                Portfolios
+                By LLC
               </button>
             </div>
           </div>
@@ -458,7 +464,7 @@ function PortfolioView({ rows }: { rows: PortfolioRow[] }) {
     <div className="p-6 space-y-6">
       {/* Bar chart */}
       <div className="border border-[var(--border)] bg-white p-5">
-        <h3 className="font-serif text-base text-[var(--primary)] mb-4">Average Cost Per Unit by Portfolio (Current Week)</h3>
+        <h3 className="font-serif text-base text-[var(--primary)] mb-4">Average Cost Per Unit by Billing LLC (Current Week)</h3>
         <ResponsiveContainer width="100%" height={220}>
           <BarChart data={chartData} margin={{ top: 4, right: 16, bottom: 48, left: 16 }}>
             <XAxis
@@ -492,7 +498,7 @@ function PortfolioView({ rows }: { rows: PortfolioRow[] }) {
         <table className="w-full text-sm border-collapse">
           <thead>
             <tr className="bg-[var(--primary)] text-white text-xs">
-              <th className="px-4 py-2.5 text-left font-medium">Portfolio</th>
+              <th className="px-4 py-2.5 text-left font-medium">Billing LLC</th>
               <th className="px-4 py-2.5 text-right font-medium">Properties</th>
               <th className="px-4 py-2.5 text-right font-medium">Units</th>
               <th className="px-4 py-2.5 text-right font-medium">Week Total Cost</th>
@@ -523,7 +529,7 @@ function PortfolioView({ rows }: { rows: PortfolioRow[] }) {
           </tbody>
           <tfoot>
             <tr className="bg-[var(--primary)] text-white text-xs font-semibold">
-              <td className="px-4 py-2.5">All Portfolios</td>
+              <td className="px-4 py-2.5">All LLCs</td>
               <td className="px-4 py-2.5 text-right">{rows.reduce((s, r) => s + r.property_count, 0)}</td>
               <td className="px-4 py-2.5 text-right">{rows.reduce((s, r) => s + r.total_units, 0)}</td>
               <td className="px-4 py-2.5 text-right">{formatCurrency(rows.reduce((s, r) => s + r.current_total_cost, 0))}</td>

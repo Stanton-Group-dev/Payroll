@@ -82,11 +82,11 @@ function CompareTable({ title, rows, money = true }: { title: string; rows: Comp
 }
 
 /**
- * Per-portfolio cost comparison with cost-per-unit, each row expandable to its
- * buildings. The $/unit denominator is the portfolio's full active-unit count, so
- * the per-unit delta tracks cost change rather than which buildings got work.
+ * Per-billing-LLC cost comparison with cost-per-unit, each row expandable to its
+ * buildings. The $/unit denominator is the LLC's full active-unit count, so the
+ * per-unit delta tracks cost change rather than which buildings got work.
  */
-function PortfolioCompareTable({ rows }: { rows: CostCompareRow[] }) {
+function LlcCompareTable({ rows }: { rows: CostCompareRow[] }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   if (rows.length === 0) return null
   const toggle = (key: string) =>
@@ -99,12 +99,12 @@ function PortfolioCompareTable({ rows }: { rows: CostCompareRow[] }) {
 
   return (
     <div>
-      <h4 className="font-serif text-sm text-[var(--primary)] mb-2">By Portfolio (total cost & cost / unit)</h4>
+      <h4 className="font-serif text-sm text-[var(--primary)] mb-2">By Billing LLC (total cost &amp; cost / unit)</h4>
       <div className="border border-[var(--border)] overflow-auto">
         <table className="w-full text-sm border-collapse">
           <thead>
             <tr className="bg-[var(--bg-section)] text-[var(--muted)] text-xs">
-              <th className="px-3 py-2 text-left font-medium">Portfolio</th>
+              <th className="px-3 py-2 text-left font-medium">Billing LLC</th>
               <th className="px-3 py-2 text-right font-medium">Units</th>
               <th className="px-3 py-2 text-right font-medium">$/Unit Prior</th>
               <th className="px-3 py-2 text-right font-medium">$/Unit Cur</th>
@@ -226,7 +226,7 @@ export function PayrollComparisonPanel({ weekId }: { weekId: string }) {
                 <MetricCard label="Total Hours" metric={report.totals.total_hours} money={false} />
               </div>
 
-              <PortfolioCompareTable rows={report.byPortfolio} />
+              <LlcCompareTable rows={report.byLlc} />
               <CompareTable title="By Employee (gross pay)" rows={report.byEmployee} />
             </>
           )}
