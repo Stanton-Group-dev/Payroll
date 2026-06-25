@@ -42,6 +42,7 @@ export interface InvoicePropLine {
   labor_cost: number
   spread_cost: number
   mileage_cost: number
+  expense_cost: number
   mgmt_fee: number
   total_cost: number
   llc: string
@@ -145,6 +146,7 @@ export function useInvoiceBuild(weekId: string) {
           }
         }
         if (pc.mileage_cost > 0) breakdown.push({ act: 'Mileage', hours: 0, labor: pc.mileage_cost })
+        if (pc.expense_cost > 0) breakdown.push({ act: 'Reimbursed Expenses', hours: 0, labor: pc.expense_cost })
         const prop = review.properties.find(p => p.id === pc.property_id)
         const llc = prop?.billing_llc
           || (prop?.portfolio_id ? ownerByPortfolio[prop.portfolio_id] : null)
@@ -158,7 +160,7 @@ export function useInvoiceBuild(weekId: string) {
     const invoices: BuiltInvoice[] = Object.entries(byLlc).map(([llc, props]) => ({
       llc,
       props: props.sort((a, b) => b.total_cost - a.total_cost),
-      amount: props.reduce((s, p) => s + p.labor_cost + p.spread_cost + p.mileage_cost, 0),
+      amount: props.reduce((s, p) => s + p.labor_cost + p.spread_cost + p.mileage_cost + p.expense_cost, 0),
       mgmt: props.reduce((s, p) => s + p.mgmt_fee, 0),
       total: props.reduce((s, p) => s + p.total_cost, 0),
     })).sort((a, b) => b.total - a.total)

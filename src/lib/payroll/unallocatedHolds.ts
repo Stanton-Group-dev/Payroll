@@ -85,20 +85,57 @@ export async function detectUnallocatedEmployees(
 }
 
 /**
- * The SMS body sent to an employee with unallocated hours.
+ * The default unallocated-hours SMS body. Used when no custom template is set in
+ * payroll_global_config.unallocated_sms_template. Editable from Admin -> Employee SMS.
+ * Placeholders below are filled in by {@link renderUnallocatedSms}.
  *
  * Self-service framing on purpose: tell them exactly what's wrong and that THEY fix it
  * in Workyard — not "come to the office and explain yourself." Unassigned hours can't be
  * paid, so the fix (assign them to a property) is theirs to make before the week closes.
  */
-export function composeUnallocatedSms(emp: UnallocatedEmployee, week: WeekRow): string {
+export const DEFAULT_UNALLOCATED_SMS_TEMPLATE =
+  `Stanton Payroll: {first_name}, you have {hours} from the week of {week_start} not yet ` +
+  `assigned to a property in Workyard. Unassigned hours can't be paid — please open Workyard ` +
+  `and assign them. Questions? Call the office.`
+
+/** Placeholder tokens a manager can use in the template, with a short description for the UI. */
+export const SMS_TEMPLATE_PLACEHOLDERS: Array<{ token: string; describe: string }> = [
+  { token: '{first_name}', describe: "Employee's first name" },
+  { token: '{full_name}', describe: "Employee's full name" },
+  { token: '{hours}', describe: 'Unallocated hours, e.g. "2.5 hours" / "1 hour"' },
+  { token: '{week_start}', describe: 'Week start date' },
+  { token: '{week_end}', describe: 'Week end date' },
+]
+
+/** Interpolate a template with an employee + week. Unknown tokens are left untouched. */
+export function renderUnallocatedSms(template: string, emp: UnallocatedEmployee, week: WeekRow): string {
   const hrs = emp.unallocated_hours === 1 ? '1 hour' : `${emp.unallocated_hours} hours`
   const first = emp.name.split(' ')[0] || emp.name
-  return (
-    `Stanton Payroll: ${first}, you have ${hrs} from the week of ${week.week_start} not yet ` +
-    `assigned to a property in Workyard. Unassigned hours can't be paid — please open Workyard ` +
-    `and assign them. Questions? Call the office.`
-  )
+  const map: Record<string, string> = {
+    '{first_name}': first,
+    '{full_name}': emp.name,
+    '{hours}': hrs,
+    '{week_start}': week.week_start,
+    '{week_end}': week.week_end,
+  }
+  return template.replace(/\{first_name\}|\{full_name\}|\{hours\}|\{week_start\}|\{week_end\}/g, m => map[m] ?? m)
+}
+
+/** The SMS body sent to an employee who's being held for unallocated hours (default template). */
+export function composeUnallocatedSms(emp: UnallocatedEmployee, week: WeekRow): string {
+  return renderUnallocatedSms(DEFAULT_UNALLOCATED_SMS_TEMPLATE, emp, week)
+}
+
+/** Read the effective (custom-or-default) unallocated SMS template from config. */
+export async function getUnallocatedSmsTemplate(admin: SupabaseClient): Promise<string> {
+  const { data } = await admin
+    .from('payroll_global_config')
+    .select('unallocated_sms_template')
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  const tpl = (data?.unallocated_sms_template ?? '').trim()
+  return tpl || DEFAULT_UNALLOCATED_SMS_TEMPLATE
 }
 
 export interface ApplyHoldsResult {
@@ -157,6 +194,7 @@ export async function applyUnallocatedHolds(
     .single()
   if (weekErr || !week) throw new Error(weekErr?.message ?? 'Week not found')
 
+  const template = await getUnallocatedSmsTemplate(admin)
   const candidates = await detectUnallocatedEmployees(admin, opts.weekId, threshold)
 
   // Employees a manager already released/waived this week — the cron defers to them.
@@ -235,7 +273,7 @@ export async function applyUnallocatedHolds(
       continue
     }
 
-    const body = composeUnallocatedSms(emp, week as WeekRow)
+    const body = renderUnallocatedSms(template, emp, week as WeekRow)
     let status: PayrollNotification['status']
     let provider: string | null
     let providerRef: string | null = null

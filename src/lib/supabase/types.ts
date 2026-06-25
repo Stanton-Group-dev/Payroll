@@ -26,7 +26,7 @@ export type MileageStatus = 'pending' | 'approved' | 'denied'
 export type ExpenseType = 'gas' | 'tolls' | 'parking' | 'materials' | 'tools' | 'food' | 'other' | 'mileage'
 export type ExpensePaymentMethod = 'personal' | 'company_card' | 'company_account' | 'unknown'
 export type ExpenseSubmissionStatus = 'pending' | 'approved' | 'rejected' | 'correction_requested' | 'bookkeeping_only'
-export type ExpenseAllocationMethod = 'direct' | 'unit_weighted' | 'gas_auto'
+export type ExpenseAllocationMethod = 'direct' | 'unit_weighted' | 'gas_auto' | 'custom_split'
 export type ExpenseApprovalAction = 'approved' | 'rejected' | 'correction_requested' | 'routed_to_bookkeeping' | 'payment_method_resolved'
 
 export interface GasAllocationEntry {
@@ -263,7 +263,8 @@ export interface PayrollEmployeeHold {
 export interface PayrollNotification {
   id: string
   payroll_week_id: string | null
-  employee_id: string
+  /** Null for sends not tied to one employee, e.g. a manager's test send. */
+  employee_id: string | null
   channel: NotificationChannel
   to_address: string | null
   body: string
@@ -285,7 +286,13 @@ export interface PayrollAdjustment {
   amount: number
   description: string
   allocation_method: AllocationMethod
+  /** Direct-billed property for this adjustment (gas split legs, single-property and
+   *  custom-split expense reimbursements). Null for unit-weighted / employee-pay rows. */
+  property_id?: string | null
   prior_week_id?: string | null
+  /** Set when this adjustment originated from an approved expense submission/item. */
+  expense_submission_id?: string | null
+  expense_item_id?: string | null
   created_at: string
   updated_at: string
   created_by: string | null
@@ -355,6 +362,8 @@ export interface PayrollInvoiceLineItem {
   cost_type: CostType
   labor_amount: number
   spread_amount: number
+  /** Pass-through reimbursed expenses billed on this line, at cost (no mgmt fee). */
+  expense_amount: number
   mgmt_fee_amount: number
   total_amount: number
   created_at: string
@@ -366,6 +375,8 @@ export interface PayrollWeeklyPropertyCost {
   property_id: string
   labor_cost: number
   spread_cost: number
+  /** Reimbursed expenses billed to this property this week, at cost. */
+  expense_cost: number
   total_cost: number
   cost_per_unit: number
   property?: Property
@@ -488,6 +499,8 @@ export interface PayrollGlobalConfig {
   ot_threshold_hours: number
   /** Master switch for the automated daily unallocated-hours SMS job. Off by default. */
   unallocated_notifications_enabled: boolean | null
+  /** Editable SMS body for unallocated-hours holds. NULL = built-in default. Editable in Admin → Employee SMS. */
+  unallocated_sms_template: string | null
   created_at: string
   updated_at: string
   created_by: string | null

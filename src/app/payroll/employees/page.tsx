@@ -612,11 +612,14 @@ export default function EmployeesPage() {
                 </tbody>
               </table>
             )}
+            <p className="text-xs text-[var(--muted)] mb-1.5">Add a new rate — applied when you click Save Changes.</p>
             <div className="flex gap-2 mb-4">
-              <div className="flex-1">
+              <div className="flex-1 min-w-0">
                 <FormInput type="number" step="0.01" placeholder="New rate" value={newRate} onChange={e => setNewRate(e.target.value)} />
               </div>
-              <FormInput type="date" value={newRateDate} onChange={e => setNewRateDate(e.target.value)} className="w-36" />
+              <div className="w-40 shrink-0">
+                <FormInput type="date" value={newRateDate} onChange={e => setNewRateDate(e.target.value)} />
+              </div>
             </div>
           </>
         )}

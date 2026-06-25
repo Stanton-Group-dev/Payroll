@@ -17,6 +17,7 @@ export interface PropertyCost {
   total_units: number
   labor_cost: number
   spread_cost: number
+  expense_cost: number
   mgmt_fee: number
   total_cost: number
   portfolio_id: string | null
@@ -28,6 +29,7 @@ interface WeeklyCostRow {
   property_id: string
   labor_cost: number | null
   spread_cost: number | null
+  expense_cost: number | null
   total_cost: number
 }
 
@@ -49,7 +51,7 @@ export function usePayrollWeekInvoices(weekId: string) {
     const [weekRes, costsRes, propsRes, portRes] = await Promise.all([
       supabase.from('payroll_weeks').select('*').eq('id', weekId).single(),
       supabase.from('payroll_weekly_property_costs')
-        .select('property_id, labor_cost, spread_cost, total_cost')
+        .select('property_id, labor_cost, spread_cost, expense_cost, total_cost')
         .eq('payroll_week_id', weekId),
       supabase.from('payroll_property').select(CURATED_PROPERTY_COLUMNS),
       supabase.from('portfolios').select('id, include_in_invoicing'),
@@ -82,7 +84,11 @@ export function usePayrollWeekInvoices(weekId: string) {
       if (prop.portfolio_id != null && excludedPortfolios.has(prop.portfolio_id)) continue
       const labor = typedRow.labor_cost ?? 0
       const spread = typedRow.spread_cost ?? 0
-      const mgmt_fee = typedRow.total_cost - labor - spread
+      const expense = typedRow.expense_cost ?? 0
+      // What's left after labor/spread/expense is mileage + mgmt fee. Mileage isn't stored
+      // separately, so it stays bundled in this remainder (unchanged behavior); expenses are
+      // now broken out on their own line.
+      const mgmt_fee = typedRow.total_cost - labor - spread - expense
       costs.push({
         property_id: prop.id,
         property_code: prop.code,
@@ -90,6 +96,7 @@ export function usePayrollWeekInvoices(weekId: string) {
         total_units: prop.total_units ?? 0,
         labor_cost: labor,
         spread_cost: spread,
+        expense_cost: expense,
         mgmt_fee: Math.max(0, mgmt_fee),
         total_cost: typedRow.total_cost,
         portfolio_id: prop.portfolio_id,
@@ -150,6 +157,7 @@ export function usePayrollWeekInvoices(weekId: string) {
           cost_type: 'labor',
           labor_amount: pc.labor_cost,
           spread_amount: pc.spread_cost,
+          expense_amount: pc.expense_cost,
           mgmt_fee_amount: pc.mgmt_fee,
           total_amount: pc.total_cost,
         })

@@ -427,8 +427,11 @@ function SubmissionApprovalCard({
                   <p className="text-xs text-[var(--muted)] mt-0.5">
                     {item.property
                       ? `${item.property.code} - ${item.property.name}`
-                      : item.expense_type === 'tools' ? 'Unit-weighted'
+                      : item.expense_type === 'tools' ? 'Spread across all properties'
                       : item.expense_type === 'gas' ? 'Auto-allocated'
+                      : item.allocation_method === 'unit_weighted' ? 'Spread across all properties'
+                      : item.allocation_method === 'custom_split'
+                        ? `Split across ${item.allocation_detail?.length ?? 0} propert${(item.allocation_detail?.length ?? 0) === 1 ? 'y' : 'ies'}`
                       : '-'}
                     {' · '}{item.payment_method.replace(/_/g, ' ')}
                     {item.prior_week ? ` · Prior week: ${format(parseISO(item.prior_week.week_start), 'M/d')}` : ''}

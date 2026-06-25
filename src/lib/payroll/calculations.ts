@@ -70,6 +70,10 @@ export interface PropertyCostSummary {
   labor_cost: number
   spread_cost: number
   mileage_cost: number
+  /** Reimbursed expenses billed to this property at cost (gas/materials/tools/…).
+   *  Direct allocations land on their property; unit-weighted ones are spread by unit
+   *  count. Pass-through — billed at cost, NOT in the management-fee base (like mileage). */
+  expense_cost: number
   mgmt_fee: number
   total_cost: number
   cost_per_unit: number
@@ -479,17 +483,47 @@ export function calculatePayroll(
     }
   }
 
+  // Method D: Reimbursed expenses billed through to the property at cost.
+  // Approved expenses arrive as 'expense_reimbursement' adjustments (the worker is already
+  // reimbursed in the per-employee loop above; this is the BILLING side). Two flavors:
+  //   • direct  — gas (exploded to one row per property), a single-property receipt, or a
+  //               custom split (exploded to one row per property): bill that property at cost.
+  //   • unit_weighted — a general/overhead receipt (tools, "spread across all"): no single
+  //               property, so spread across billable properties by unit count, like salaried.
+  // Pass-through, like mileage: billed at cost, NEVER in the management-fee base.
+  const propExpenseCost: Record<string, number> = {}
+  let expenseSpread = 0
+  for (const adj of adjustments) {
+    if (adj.type !== 'expense_reimbursement') continue
+    if (adj.allocation_method === 'unit_weighted') {
+      expenseSpread += adj.amount
+    } else if (adj.property_id) {
+      propExpenseCost[adj.property_id] = (propExpenseCost[adj.property_id] ?? 0) + adj.amount
+    }
+    // A direct expense with no property_id is paid-but-unbilled, by design — there's
+    // nothing to bill it against (mirrors mileage's no-property handling).
+  }
+  if (expenseSpread !== 0 && billableUnits) {
+    for (const prop of properties) {
+      if (prop.include_in_invoicing === false) continue
+      propExpenseCost[prop.id] =
+        (propExpenseCost[prop.id] ?? 0) + (prop.total_units ?? 0) / billableUnits * expenseSpread
+    }
+  }
+
   // Build property cost summaries
   const property_costs: PropertyCostSummary[] = []
   for (const prop of properties) {
     const labor = propLaborCost[prop.id] ?? 0
     const spread = propSpreadCost[prop.id] ?? 0
     const mileage = propMileageCost[prop.id] ?? 0
+    const expense = propExpenseCost[prop.id] ?? 0
     // C-5: use the week's start date so the fee rate is point-in-time.
     const feeRate = getMgmtFeeRate(prop.portfolio_id, mgmtFeeConfigs, weekStart)
-    // Mileage is pass-through: billed to the property at cost, NOT in the fee base.
+    // Mileage and reimbursed expenses are pass-through: billed to the property at cost,
+    // NOT in the fee base. (Phone/tools spread remains in the base — it's general overhead.)
     const mgmt_fee = (labor + spread) * feeRate
-    const total_cost = labor + spread + mileage + mgmt_fee
+    const total_cost = labor + spread + mileage + expense + mgmt_fee
     property_costs.push({
       property_id: prop.id,
       property_code: prop.code,
@@ -499,6 +533,7 @@ export function calculatePayroll(
       labor_cost: round2(labor),
       spread_cost: round2(spread),
       mileage_cost: round2(mileage),
+      expense_cost: round2(expense),
       mgmt_fee: round2(mgmt_fee),
       total_cost: round2(total_cost),
       cost_per_unit: prop.total_units ? round2(total_cost / prop.total_units) : 0,

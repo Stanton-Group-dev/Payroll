@@ -37,6 +37,7 @@ import {
   LayoutDashboard,
   Wand2,
   ClipboardList,
+  MessageSquare,
   EyeOff,
   type LucideIcon,
 } from 'lucide-react'
@@ -94,6 +95,7 @@ const settingsItems: Item[] = [
   { href: '/payroll/admin/thresholds', label: 'Budget Thresholds', icon: Target },
   { href: '/payroll/admin/external-projects', label: 'External Projects', icon: Building2 },
   { href: '/payroll/admin/workyard-customers', label: 'Workyard Customers', icon: Building2 },
+  { href: '/payroll/admin/notifications', label: 'Employee SMS', icon: MessageSquare },
   { href: '/payroll/admin/users', label: 'Users & Roles', icon: Users },
 ]
 

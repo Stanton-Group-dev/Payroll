@@ -245,55 +245,68 @@ export function useExpenseApprovals() {
     )
 
     for (const item of personalItems) {
+      const label = item.expense_type.charAt(0).toUpperCase() + item.expense_type.slice(1)
+      const insertAdj = async (row: {
+        amount: number
+        description: string
+        allocation_method: 'direct' | 'unit_weighted'
+        property_id: string | null
+      }) => {
+        const { error: adjErr } = await supabase.from('payroll_adjustments').insert({
+          payroll_week_id: submission.payroll_week_id,
+          employee_id: submission.employee_id,
+          type: 'expense_reimbursement',
+          amount: row.amount,
+          description: row.description,
+          allocation_method: row.allocation_method,
+          property_id: row.property_id,
+          expense_submission_id: submission.id,
+          expense_item_id: item.id,
+          prior_week_id: item.prior_week_id ?? null,
+          created_by: userId,
+        })
+        if (adjErr) throw new Error(`Failed to create adjustment: ${adjErr.message}`)
+      }
+
       if (item.expense_type === 'gas' && finalAllocations.has(item.id)) {
+        // Gas: per-property split computed at approval from the employee's visits.
         for (const alloc of Array.from(finalAllocations.get(item.id) ?? [])) {
-          const { error: adjErr } = await supabase.from('payroll_adjustments').insert({
-            payroll_week_id: submission.payroll_week_id,
-            employee_id: submission.employee_id,
-            type: 'expense_reimbursement',
+          await insertAdj({
             amount: alloc.amount,
             description: `Gas reimbursement - ${alloc.property_code ?? alloc.property_id}`,
             allocation_method: 'direct',
             property_id: alloc.property_id,
-            expense_submission_id: submission.id,
-            expense_item_id: item.id,
-            prior_week_id: item.prior_week_id ?? null,
-            created_by: userId,
           })
-          if (adjErr) throw new Error(`Failed to create adjustment: ${adjErr.message}`)
         }
-      } else if (item.expense_type === 'tools') {
-        const { error: adjErr } = await supabase.from('payroll_adjustments').insert({
-          payroll_week_id: submission.payroll_week_id,
-          employee_id: submission.employee_id,
-          type: 'expense_reimbursement',
+      } else if (item.expense_type === 'tools' || item.allocation_method === 'unit_weighted') {
+        // Spread across all billable properties by unit count (tools, or any expense the
+        // submitter marked "spread across all properties").
+        await insertAdj({
           amount: item.amount,
-          description: 'Tools reimbursement',
+          description: `${label} reimbursement${item.description ? ` - ${item.description}` : ''} (spread)`,
           allocation_method: 'unit_weighted',
           property_id: null,
-          expense_submission_id: submission.id,
-          expense_item_id: item.id,
-          prior_week_id: item.prior_week_id ?? null,
-          created_by: userId,
         })
-        if (adjErr) throw new Error(`Failed to create adjustment: ${adjErr.message}`)
+      } else if (item.allocation_method === 'custom_split' && (item.allocation_detail?.length ?? 0) > 0) {
+        // Submitter divided one receipt across several properties — explode to one direct
+        // row per leg (like gas), so each property is billed its share at cost.
+        for (const leg of item.allocation_detail ?? []) {
+          await insertAdj({
+            amount: leg.amount,
+            description: `${label} reimbursement - ${leg.property_code ?? leg.property_id} (split)`,
+            allocation_method: 'direct',
+            property_id: leg.property_id,
+          })
+        }
       } else {
+        // Single property (with approval-time override support).
         const finalPropertyId = propertyOverrides.find(o => o.item_id === item.id)?.new_property_id ?? item.property_id
-        const label = item.expense_type.charAt(0).toUpperCase() + item.expense_type.slice(1)
-        const { error: adjErr } = await supabase.from('payroll_adjustments').insert({
-          payroll_week_id: submission.payroll_week_id,
-          employee_id: submission.employee_id,
-          type: 'expense_reimbursement',
+        await insertAdj({
           amount: item.amount,
           description: `${label} reimbursement${item.description ? ` - ${item.description}` : ''}`,
           allocation_method: 'direct',
           property_id: finalPropertyId ?? null,
-          expense_submission_id: submission.id,
-          expense_item_id: item.id,
-          prior_week_id: item.prior_week_id ?? null,
-          created_by: userId,
         })
-        if (adjErr) throw new Error(`Failed to create adjustment: ${adjErr.message}`)
       }
     }
 

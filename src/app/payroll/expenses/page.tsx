@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useCallback, useMemo } from 'react'
+import { useState, useRef, useCallback, useMemo, useEffect } from 'react'
 import { format, parseISO } from 'date-fns'
 import {
   Plus, X, Upload, ChevronDown, ChevronUp, AlertTriangle,
@@ -21,7 +21,7 @@ import { usePayrollEmployees } from '@/hooks/payroll/usePayrollEmployees'
 import { usePayrollWeeks } from '@/hooks/payroll/usePayrollWeeks'
 import { useProperties } from '@/hooks/payroll/useProperties'
 import { useAuth } from '@/hooks/payroll/useAuth'
-import type { PayrollExpenseSubmission, ExpenseType, ExpensePaymentMethod } from '@/lib/supabase/types'
+import type { PayrollExpenseSubmission, ExpenseType, ExpensePaymentMethod, ExpenseAllocationMethod } from '@/lib/supabase/types'
 import { ApprovalTab } from './ApprovalTab'
 import { BookkeepingTab } from './BookkeepingTab'
 
@@ -54,6 +54,89 @@ const PAYMENT_METHOD_NOTES: Record<ExpensePaymentMethod, string | null> = {
 
 type TabId = 'submit' | 'pending' | 'bookkeeping'
 
+// Allocation modes a submitter can pick for a non-gas, non-tools expense.
+const ALLOCATION_MODE_LABELS: Record<'direct' | 'unit_weighted' | 'custom_split', string> = {
+  direct: 'One property',
+  unit_weighted: 'Spread across all properties (by unit count)',
+  custom_split: 'Split across selected properties',
+}
+
+// Count the valid legs of a custom split (property set + positive percent).
+function validSplitLegs(item: DraftExpenseItem): { property_id: string; pct: string }[] {
+  return item.split_entries.filter(s => s.property_id && (parseFloat(s.pct) || 0) > 0)
+}
+
+// ── Split allocation editor ───────────────────────────────────────────────────
+// Divide one receipt across several properties by percent. Percentages must total 100%.
+
+function SplitAllocationEditor({
+  item,
+  properties,
+  onChange,
+}: {
+  item: DraftExpenseItem
+  properties: { id: string; code: string; name: string }[]
+  onChange: (id: string, patch: Partial<DraftExpenseItem>) => void
+}) {
+  const amount = parseFloat(item.amount) || 0
+  const rows = item.split_entries
+  const setRows = (next: typeof rows) => onChange(item.id, { split_entries: next })
+  const pctSum = rows.reduce((s, r) => s + (parseFloat(r.pct) || 0), 0)
+
+  return (
+    <div className="mt-2 border border-[var(--border)] bg-[var(--bg-section)] p-3">
+      <p className="text-xs text-[var(--muted)] mb-2">
+        Divide this receipt across properties — percentages must total 100%.
+        Remaining: <strong className={Math.abs(pctSum - 100) > 0.5 ? 'text-[var(--warning)]' : 'text-[var(--success)]'}>{(100 - pctSum).toFixed(1)}%</strong>
+      </p>
+      {rows.map((r, i) => (
+        <div key={i} className="flex items-center gap-2 mb-1.5">
+          <FormSelect
+            value={r.property_id}
+            onChange={e => setRows(rows.map((x, j) => j === i ? { ...x, property_id: e.target.value } : x))}
+            className="flex-1 text-xs py-1"
+          >
+            <option value="">— property —</option>
+            {properties.map(p => (
+              <option key={p.id} value={p.id}>{p.code} — {p.name}</option>
+            ))}
+          </FormSelect>
+          <FormInput
+            type="number"
+            min="0"
+            max="100"
+            step="0.1"
+            placeholder="0"
+            value={r.pct}
+            onChange={e => setRows(rows.map((x, j) => j === i ? { ...x, pct: e.target.value } : x))}
+            className="w-16 text-right text-xs py-1"
+          />
+          <span className="text-xs text-[var(--muted)]">%</span>
+          <span className="text-xs text-[var(--muted)] w-16 text-right">
+            ${(amount * (parseFloat(r.pct) || 0) / 100).toFixed(2)}
+          </span>
+          <button
+            type="button"
+            onClick={() => setRows(rows.filter((_, j) => j !== i))}
+            className="text-[var(--muted)] hover:text-[var(--error)] p-1"
+            title="Remove property"
+          >
+            <X size={13} />
+          </button>
+        </div>
+      ))}
+      <FormButton
+        variant="ghost"
+        size="sm"
+        type="button"
+        onClick={() => setRows([...rows, { property_id: '', pct: '' }])}
+      >
+        <Plus size={12} className="mr-1" /> Add property
+      </FormButton>
+    </div>
+  )
+}
+
 // ── Receipt Item Card ─────────────────────────────────────────────────────────
 
 function ItemCard({
@@ -74,7 +157,9 @@ function ItemCard({
   const [expanded, setExpanded] = useState(true)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const needsProperty = item.expense_type !== 'tools' && item.expense_type !== 'mileage'
+  // tools is always unit-weighted (no picker); gas is auto-allocated at approval; every
+  // other type lets the submitter choose one / spread / split below.
+  const showAllocation = item.expense_type !== 'tools' && item.expense_type !== 'mileage'
   const needsDescription = item.expense_type === 'other'
   const descriptionOptional = ['materials', 'food'].includes(item.expense_type)
 
@@ -124,7 +209,18 @@ function ItemCard({
           <FormField label="Expense Type" required>
             <FormSelect
               value={item.expense_type}
-              onChange={e => onChange(item.id, { expense_type: e.target.value as ExpenseType })}
+              onChange={e => {
+                const t = e.target.value as ExpenseType
+                // Keep allocation_method valid for the new type: gas → auto, tools → spread,
+                // anything else → keep the chosen mode, defaulting to a single property.
+                const allocation_method: ExpenseAllocationMethod =
+                  t === 'gas' ? 'gas_auto'
+                  : t === 'tools' ? 'unit_weighted'
+                  : (item.allocation_method === 'direct' || item.allocation_method === 'unit_weighted' || item.allocation_method === 'custom_split')
+                    ? item.allocation_method
+                    : 'direct'
+                onChange(item.id, { expense_type: t, allocation_method })
+              }}
             >
               {(Object.keys(EXPENSE_TYPE_LABELS) as ExpenseType[])
                 .filter(t => t !== 'mileage')
@@ -146,30 +242,58 @@ function ItemCard({
             />
           </FormField>
 
-          {/* Property (hidden for tools) */}
-          {needsProperty && (
+          {/* Allocation — hidden for tools (always unit-weighted) */}
+          {item.expense_type === 'gas' ? (
             <FormField
-              label={item.expense_type === 'gas' ? 'Property (auto-allocated at approval)' : 'Property / Project'}
-              required={item.expense_type !== 'gas'}
-              helperText={item.expense_type === 'gas' ? 'Gas will be split by your property visits — no selection needed.' : undefined}
+              label="Property (auto-allocated at approval)"
+              helperText="Gas will be split by your property visits — no selection needed."
             >
-              {item.expense_type === 'gas' ? (
-                <div className="px-3 py-2 border border-[var(--divider)] bg-[var(--bg-section)] text-sm text-[var(--muted)] italic">
-                  Auto-allocated at approval time
-                </div>
-              ) : (
+              <div className="px-3 py-2 border border-[var(--divider)] bg-[var(--bg-section)] text-sm text-[var(--muted)] italic">
+                Auto-allocated at approval time
+              </div>
+            </FormField>
+          ) : showAllocation ? (
+            <div className="col-span-2">
+              <FormField
+                label="Bill to property"
+                required
+                helperText="Every expense is billed to the property owner. Choose how to allocate it."
+              >
                 <FormSelect
-                  value={item.property_id}
-                  onChange={e => onChange(item.id, { property_id: e.target.value })}
+                  value={item.allocation_method}
+                  onChange={e => onChange(item.id, { allocation_method: e.target.value as ExpenseAllocationMethod })}
                 >
-                  <option value="">— Select property —</option>
-                  {properties.map(p => (
-                    <option key={p.id} value={p.id}>{p.code} — {p.name}</option>
+                  {(['direct', 'unit_weighted', 'custom_split'] as const).map(m => (
+                    <option key={m} value={m}>{ALLOCATION_MODE_LABELS[m]}</option>
                   ))}
                 </FormSelect>
+              </FormField>
+
+              {item.allocation_method === 'direct' && (
+                <div className="mt-2">
+                  <FormSelect
+                    value={item.property_id}
+                    onChange={e => onChange(item.id, { property_id: e.target.value })}
+                  >
+                    <option value="">— Select property —</option>
+                    {properties.map(p => (
+                      <option key={p.id} value={p.id}>{p.code} — {p.name}</option>
+                    ))}
+                  </FormSelect>
+                </div>
               )}
-            </FormField>
-          )}
+
+              {item.allocation_method === 'unit_weighted' && (
+                <p className="mt-2 text-xs text-[var(--muted)]">
+                  Billed across every managed property in proportion to its unit count — no selection needed.
+                </p>
+              )}
+
+              {item.allocation_method === 'custom_split' && (
+                <SplitAllocationEditor item={item} properties={properties} onChange={onChange} />
+              )}
+            </div>
+          ) : null}
 
           {/* Payment method */}
           <FormField label="How was this paid?" required>
@@ -323,7 +447,12 @@ function SubmissionRow({ sub }: { sub: PayrollExpenseSubmission }) {
                 <tr key={item.id} className="border-t border-[var(--divider)]">
                   <td className="py-2">{EXPENSE_TYPE_LABELS[item.expense_type]}</td>
                   <td className="py-2 text-[var(--muted)]">
-                    {item.property ? `${item.property.code}` : item.expense_type === 'tools' ? 'Unit-weighted' : item.expense_type === 'gas' ? 'Auto-alloc' : '—'}
+                    {item.property ? item.property.code
+                      : item.expense_type === 'tools' ? 'Spread'
+                      : item.expense_type === 'gas' ? 'Auto-alloc'
+                      : item.allocation_method === 'unit_weighted' ? 'Spread'
+                      : item.allocation_method === 'custom_split' ? `Split (${item.allocation_detail?.length ?? 0})`
+                      : '—'}
                   </td>
                   <td className="py-2 text-[var(--muted)]">{item.payment_method.replace(/_/g, ' ')}</td>
                   <td className="py-2 text-right font-medium">${item.amount.toFixed(2)}</td>
@@ -365,6 +494,13 @@ export default function ExpensesPage() {
 
   const cutoffInfo = useCutoffInfo(config)
 
+  // Which payroll week this batch lands in. Defaults to the cutoff rule's
+  // assignment (current before cutoff, next after) but can be overridden.
+  const [selectedWeekId, setSelectedWeekId] = useState<string | null>(null)
+  useEffect(() => {
+    setSelectedWeekId(cutoffInfo.assignedWeekId)
+  }, [cutoffInfo.assignedWeekId])
+
   const [activeTab, setActiveTab] = useState<TabId>('submit')
 
   // Submission form state
@@ -401,8 +537,24 @@ export default function ExpensesPage() {
     items.forEach((item, i) => {
       if (!item.receipt_file) errs.push(`Item ${i + 1}: receipt photo required.`)
       if (!item.amount || parseFloat(item.amount) <= 0) errs.push(`Item ${i + 1}: valid amount required.`)
-      if (item.expense_type !== 'gas' && item.expense_type !== 'tools' && !item.property_id) {
-        errs.push(`Item ${i + 1}: property required for ${EXPENSE_TYPE_LABELS[item.expense_type]}.`)
+      if (item.expense_type !== 'gas' && item.expense_type !== 'tools') {
+        if (item.allocation_method === 'direct' && !item.property_id) {
+          errs.push(`Item ${i + 1}: select a property (or choose spread / split).`)
+        } else if (item.allocation_method === 'custom_split') {
+          const legs = validSplitLegs(item)
+          if (legs.length === 0) {
+            errs.push(`Item ${i + 1}: add at least one property to the split.`)
+          } else {
+            const sum = item.split_entries.reduce((s, r) => s + (parseFloat(r.pct) || 0), 0)
+            if (Math.abs(sum - 100) > 0.5) {
+              errs.push(`Item ${i + 1}: split percentages must total 100% (currently ${sum.toFixed(1)}%).`)
+            }
+            const ids = legs.map(l => l.property_id)
+            if (new Set(ids).size !== ids.length) {
+              errs.push(`Item ${i + 1}: each property can appear only once in the split.`)
+            }
+          }
+        }
       }
       if (item.expense_type === 'other' && !item.description) {
         errs.push(`Item ${i + 1}: description required for "Other".`)
@@ -435,7 +587,7 @@ export default function ExpensesPage() {
       await submitBatch({
         employeeId: selectedEmployeeId,
         submittedBy: userId,
-        weekId: cutoffInfo.assignedWeekId,
+        weekId: selectedWeekId,
         signatureDataUrl,
         notes: batchNotes,
         items,
@@ -505,6 +657,27 @@ export default function ExpensesPage() {
               {cutoffInfo.isAfterCutoff && <AlertTriangle size={14} className="inline mr-1.5 text-[var(--warning)]" />}
               {cutoffInfo.message}
             </InfoBlock>
+          )}
+
+          {/* Week override — the cutoff sets a default, but you can reassign */}
+          {cutoffInfo.currentWeekId && cutoffInfo.nextWeekId && (
+            <div className="mb-5">
+              <FormField label="Payroll week">
+                <FormSelect
+                  value={selectedWeekId ?? ''}
+                  onChange={e => setSelectedWeekId(e.target.value)}
+                >
+                  <option value={cutoffInfo.currentWeekId}>
+                    Current week{cutoffInfo.currentWeekStart ? ` — ${format(parseISO(cutoffInfo.currentWeekStart), 'MMM d')}` : ''}
+                    {selectedWeekId === cutoffInfo.assignedWeekId && !cutoffInfo.isAfterCutoff ? ' (default)' : ''}
+                  </option>
+                  <option value={cutoffInfo.nextWeekId}>
+                    Next week{cutoffInfo.nextWeekStart ? ` — ${format(parseISO(cutoffInfo.nextWeekStart), 'MMM d')}` : ''}
+                    {cutoffInfo.isAfterCutoff ? ' (default after cutoff)' : ''}
+                  </option>
+                </FormSelect>
+              </FormField>
+            </div>
           )}
 
           {!reviewing ? (
@@ -622,8 +795,10 @@ export default function ExpensesPage() {
                       <td className="px-4 py-2.5 text-[var(--muted)]">{i + 1}</td>
                       <td className="px-4 py-2.5">{EXPENSE_TYPE_LABELS[item.expense_type]}</td>
                       <td className="px-4 py-2.5 text-[var(--muted)]">
-                        {item.expense_type === 'tools' ? 'Unit-weighted'
+                        {item.expense_type === 'tools' ? 'Spread (all)'
                           : item.expense_type === 'gas' ? 'Auto at approval'
+                          : item.allocation_method === 'unit_weighted' ? 'Spread (all)'
+                          : item.allocation_method === 'custom_split' ? `Split (${validSplitLegs(item).length})`
                           : properties.find(p => p.id === item.property_id)?.code ?? '—'}
                       </td>
                       <td className="px-4 py-2.5 text-[var(--muted)] capitalize">

@@ -106,17 +106,23 @@ function TimesheetsPageContent() {
     setDrawerDirty(false)
   }, [selectedEmployeeId])
 
-  // Auto-select once entries load. Prefer the first employee with something to
-  // resolve (unresolved blocks first, then pending) so the user lands on a problem
-  // instead of whoever happens to be alphabetically first; fall back to the first.
+  // Auto-select once entries load. If the URL names an employee (e.g. a name link
+  // from the Review pay summary), land on that person; otherwise prefer the first
+  // employee with something to resolve (unresolved blocks first, then pending) so
+  // the user lands on a problem instead of whoever's alphabetically first.
+  const employeeParam = searchParams.get('employee')
   useEffect(() => {
     if (selectedEmployeeId || employees.length === 0 || !selectedWeekId || loading) return
+    if (employeeParam) {
+      const target = employees.find(e => e.id === employeeParam)
+      if (target) { setSelectedEmployeeId(target.id); return }
+    }
     const needsAttention = (emp: PayrollEmployee, predicate: (e: PayrollTimeEntry) => boolean) =>
       allEntries.some(e => e.employee_id === emp.id && predicate(e))
     const firstUnresolved = employees.find(emp => needsAttention(emp, e => !e.property_id && !e.pending_resolution))
     const firstPending = employees.find(emp => needsAttention(emp, e => !!e.pending_resolution))
     setSelectedEmployeeId((firstUnresolved ?? firstPending ?? employees[0]).id)
-  }, [employees, allEntries, selectedWeekId, selectedEmployeeId, loading])
+  }, [employees, allEntries, selectedWeekId, selectedEmployeeId, loading, employeeParam])
 
   // Entries for the selected employee
   const employeeEntries = useMemo(() =>

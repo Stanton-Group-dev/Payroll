@@ -239,7 +239,17 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
                       <tr key={emp.employee_id} className={`border-b border-[var(--divider)] ${i % 2 === 0 ? 'bg-white' : 'bg-[var(--bg-section)]'}`}>
                         {EMP_COLS.map(col => (
                           <td key={col.key} className={`px-3 py-2 ${col.align === 'left' ? '' : 'text-right'} ${col.tdClass ?? ''}`}>
-                            {col.render(emp)}
+                            {col.key === 'employee_name' ? (
+                              <a
+                                href={`/payroll/timesheets?week=${weekId}&employee=${emp.employee_id}`}
+                                className="text-[var(--primary)] underline decoration-dotted underline-offset-2 hover:decoration-solid"
+                                title="Edit this week's hours & adjustments"
+                              >
+                                {col.render(emp)}
+                              </a>
+                            ) : (
+                              col.render(emp)
+                            )}
                           </td>
                         ))}
                       </tr>
@@ -273,6 +283,7 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
                       <th className="px-3 py-2.5 text-right font-medium">Labor</th>
                       <th className="px-3 py-2.5 text-right font-medium">Spread</th>
                       <th className="px-3 py-2.5 text-right font-medium">Mileage</th>
+                      <th className="px-3 py-2.5 text-right font-medium">Expenses</th>
                       <th className="px-3 py-2.5 text-right font-medium">Mgmt Fee (10%)</th>
                       <th className="px-3 py-2.5 text-right font-medium font-bold">Total Cost</th>
                       <th className="px-3 py-2.5 text-right font-medium">$/Unit</th>
@@ -289,6 +300,7 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
                         <td className="px-3 py-2 text-right">{formatCurrency(pc.labor_cost)}</td>
                         <td className="px-3 py-2 text-right">{pc.spread_cost ? formatCurrency(pc.spread_cost) : '—'}</td>
                         <td className="px-3 py-2 text-right">{pc.mileage_cost ? formatCurrency(pc.mileage_cost) : '—'}</td>
+                        <td className="px-3 py-2 text-right">{pc.expense_cost ? formatCurrency(pc.expense_cost) : '—'}</td>
                         <td className="px-3 py-2 text-right">{formatCurrency(pc.mgmt_fee)}</td>
                         <td className="px-3 py-2 text-right font-semibold">{formatCurrency(pc.total_cost)}</td>
                         <td className="px-3 py-2 text-right text-[var(--muted)]">{pc.cost_per_unit ? formatCurrency(pc.cost_per_unit) : '—'}</td>

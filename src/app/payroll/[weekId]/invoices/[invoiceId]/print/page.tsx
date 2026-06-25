@@ -16,6 +16,7 @@ interface LineItem {
   description: string
   labor_amount: number
   spread_amount: number | null
+  expense_amount: number | null
   mgmt_fee_amount: number
   total_amount: number
   property: { code: string; name: string } | null
@@ -93,6 +94,7 @@ export default function InvoicePrintPage({ params }: { params: Promise<{ weekId:
   if (!invoice || !week) return <div className="p-8 text-gray-500">Invoice not found.</div>
 
   const subtotal = (invoice.line_items ?? []).reduce((s, li) => s + Number(li.labor_amount) + Number(li.spread_amount ?? 0), 0)
+  const expenseTotal = (invoice.line_items ?? []).reduce((s, li) => s + Number(li.expense_amount ?? 0), 0)
   const mgmtFeeTotal = (invoice.line_items ?? []).reduce((s, li) => s + Number(li.mgmt_fee_amount), 0)
   const toggle = (id: string) => setCollapsed(prev => {
     const next = new Set(prev)
@@ -155,6 +157,7 @@ export default function InvoicePrintPage({ params }: { params: Promise<{ weekId:
               <th className="px-4 py-3 text-left font-medium text-xs uppercase tracking-wider">Property / Activity</th>
               <th className="px-4 py-3 text-right font-medium text-xs uppercase tracking-wider">Labor</th>
               <th className="px-4 py-3 text-right font-medium text-xs uppercase tracking-wider">Allocated Costs</th>
+              <th className="px-4 py-3 text-right font-medium text-xs uppercase tracking-wider">Expenses</th>
               <th className="px-4 py-3 text-right font-medium text-xs uppercase tracking-wider">Mgmt Fee (10%)</th>
               <th className="px-4 py-3 text-right font-medium text-xs uppercase tracking-wider font-bold">Total</th>
             </tr>
@@ -187,6 +190,7 @@ export default function InvoicePrintPage({ params }: { params: Promise<{ weekId:
                     </td>
                     <td className="px-4 py-3 text-right text-gray-700">{formatCurrency(labor)}</td>
                     <td className="px-4 py-3 text-right text-gray-500">{li.spread_amount ? formatCurrency(Number(li.spread_amount)) : '—'}</td>
+                    <td className="px-4 py-3 text-right text-gray-500">{li.expense_amount ? formatCurrency(Number(li.expense_amount)) : '—'}</td>
                     <td className="px-4 py-3 text-right text-gray-500">{formatCurrency(Number(li.mgmt_fee_amount))}</td>
                     <td className="px-4 py-3 text-right font-semibold text-gray-900">{formatCurrency(Number(li.total_amount))}</td>
                   </tr>
@@ -200,7 +204,7 @@ export default function InvoicePrintPage({ params }: { params: Promise<{ weekId:
                         {b.hours > 0 && <span className="text-gray-400 ml-2">{b.hours.toFixed(1)} hrs</span>}
                       </td>
                       <td className="py-1.5 px-4 text-right">{formatCurrency(b.labor)}</td>
-                      <td /><td /><td />
+                      <td /><td /><td /><td />
                     </tr>
                   ))}
                 </FragmentRows>
@@ -216,6 +220,12 @@ export default function InvoicePrintPage({ params }: { params: Promise<{ weekId:
               <span className="text-gray-500">Labor subtotal</span>
               <span>{formatCurrency(subtotal)}</span>
             </div>
+            {expenseTotal > 0 && (
+              <div className="flex justify-between py-2 border-b border-gray-200 text-sm">
+                <span className="text-gray-500">Reimbursed expenses</span>
+                <span>{formatCurrency(expenseTotal)}</span>
+              </div>
+            )}
             <div className="flex justify-between py-2 border-b border-gray-200 text-sm">
               <span className="text-gray-500">Management fee (10%)</span>
               <span>{formatCurrency(mgmtFeeTotal)}</span>

@@ -163,6 +163,8 @@ describe('calculatePayroll — golden week 2026-06-08', () => {
     expect(cents(p.labor_cost)).toBe(cents(1100))
     // mgmt_fee: (1100 + 0) * 0.10 = 110
     expect(cents(p.mgmt_fee)).toBe(cents(110))
+    // no expense_reimbursement adjustments this week → nothing billed through
+    expect(cents(p.expense_cost)).toBe(cents(0))
   })
 
   it('total_mgmt_fee is property-authoritative (OD-4)', () => {
@@ -218,6 +220,70 @@ describe('recon/export engine alignment — advance employee (PRP-02)', () => {
     expect(e.gross_pay).toBe(1000)
     // Confirm advances are captured separately (not added to gross)
     expect(e.advances).toBe(100)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Expense bill-through: approved expense reimbursements are billed to the property
+// at cost (pass-through, NOT in the management-fee base — like mileage).
+// ---------------------------------------------------------------------------
+describe('calculatePayroll — expense bill-through', () => {
+  const directExpense: PayrollAdjustment = {
+    id: 'adjE1',
+    payroll_week_id: 'wk1',
+    employee_id: 'e1',
+    type: 'expense_reimbursement',
+    amount: 50,
+    description: 'Materials reimbursement',
+    allocation_method: 'direct',
+    property_id: 'p1',
+    created_at: '2026-06-09T00:00:00Z',
+    updated_at: '2026-06-09T00:00:00Z',
+    created_by: null,
+  }
+  // Unit-weighted (spread across all billable properties). Only p1 is billable, so it
+  // absorbs the whole amount.
+  const spreadExpense: PayrollAdjustment = {
+    id: 'adjE2',
+    payroll_week_id: 'wk1',
+    employee_id: 'e1',
+    type: 'expense_reimbursement',
+    amount: 30,
+    description: 'Tools reimbursement',
+    allocation_method: 'unit_weighted',
+    property_id: null,
+    created_at: '2026-06-09T00:00:00Z',
+    updated_at: '2026-06-09T00:00:00Z',
+    created_by: null,
+  }
+
+  const result = calculatePayroll(
+    [employee],
+    [timeEntry],
+    [directExpense, spreadExpense],
+    mgmtFeeConfigs,
+    [property],
+    [],
+    {},
+    WEEK_START,
+  )
+
+  it('expense_cost = direct ($50) + unit-weighted spread ($30) = $80', () => {
+    expect(cents(result.property_costs[0].expense_cost)).toBe(cents(80))
+  })
+
+  it('mgmt_fee is unchanged — expenses are pass-through, not in the fee base', () => {
+    // (labor 1100 + spread 0) * 0.10 = 110, regardless of the $80 expense.
+    expect(cents(result.property_costs[0].mgmt_fee)).toBe(cents(110))
+  })
+
+  it('total_cost folds in the expense: 1100 labor + 80 expense + 110 mgmt = 1290', () => {
+    expect(cents(result.property_costs[0].total_cost)).toBe(cents(1290))
+  })
+
+  it('employee is reimbursed: the $80 lands in gross_pay (other_adjustments)', () => {
+    // gross = 800 + 300 + 80 = 1180
+    expect(cents(result.employee_summaries[0].gross_pay)).toBe(cents(1180))
   })
 })
 

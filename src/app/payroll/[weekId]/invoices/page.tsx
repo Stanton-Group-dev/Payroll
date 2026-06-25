@@ -112,6 +112,7 @@ export default function InvoicesPage({ params }: { params: Promise<{ weekId: str
                         <th className="px-4 py-2 text-left font-medium">Property</th>
                         <th className="px-4 py-2 text-right font-medium">Labor</th>
                         <th className="px-4 py-2 text-right font-medium">Spread</th>
+                        <th className="px-4 py-2 text-right font-medium">Expenses</th>
                         <th className="px-4 py-2 text-right font-medium">Mgmt Fee (10%)</th>
                         <th className="px-4 py-2 text-right font-medium font-bold">Total</th>
                       </tr>
@@ -127,6 +128,7 @@ export default function InvoicesPage({ params }: { params: Promise<{ weekId: str
                           </td>
                           <td className="px-4 py-2 text-right">{formatCurrency(li.labor_amount)}</td>
                           <td className="px-4 py-2 text-right">{li.spread_amount ? formatCurrency(li.spread_amount) : '—'}</td>
+                          <td className="px-4 py-2 text-right">{li.expense_amount ? formatCurrency(li.expense_amount) : '—'}</td>
                           <td className="px-4 py-2 text-right text-[var(--muted)]">{formatCurrency(li.mgmt_fee_amount)}</td>
                           <td className="px-4 py-2 text-right font-semibold">{formatCurrency(li.total_amount)}</td>
                         </tr>

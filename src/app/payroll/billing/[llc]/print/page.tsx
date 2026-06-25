@@ -12,6 +12,7 @@ interface LineItem {
   description: string | null
   labor_amount: number
   spread_amount: number | null
+  expense_amount: number | null
   mgmt_fee_amount: number
   total_amount: number
   property: { code: string; name: string } | null
@@ -56,7 +57,7 @@ export default function LLCStatementPrintPage({ params }: { params: Promise<{ ll
         .select(`
           id, status, total_amount,
           week:payroll_weeks(week_start, week_end),
-          line_items:payroll_invoice_line_items(id, description, labor_amount, spread_amount, mgmt_fee_amount, total_amount, property:properties(code, name))
+          line_items:payroll_invoice_line_items(id, description, labor_amount, spread_amount, expense_amount, mgmt_fee_amount, total_amount, property:properties(code, name))
         `)
         .eq('owner_llc', ownerLlc)
       let rows = (data ?? []) as unknown as InvoiceRow[]
@@ -74,6 +75,7 @@ export default function LLCStatementPrintPage({ params }: { params: Promise<{ ll
 
   const grandTotal = invoices.reduce((s, inv) => s + Number(inv.total_amount), 0)
   const laborTotal = invoices.reduce((s, inv) => s + inv.line_items.reduce((t, li) => t + Number(li.labor_amount) + Number(li.spread_amount ?? 0), 0), 0)
+  const expenseTotal = invoices.reduce((s, inv) => s + inv.line_items.reduce((t, li) => t + Number(li.expense_amount ?? 0), 0), 0)
   const mgmtTotal = invoices.reduce((s, inv) => s + inv.line_items.reduce((t, li) => t + Number(li.mgmt_fee_amount), 0), 0)
   const first = invoices[0].week?.week_start
   const last = invoices[invoices.length - 1].week?.week_end
@@ -133,6 +135,7 @@ export default function LLCStatementPrintPage({ params }: { params: Promise<{ ll
                   <th className="px-4 py-2 text-left font-medium text-xs uppercase tracking-wider">Property</th>
                   <th className="px-4 py-2 text-right font-medium text-xs uppercase tracking-wider">Labor</th>
                   <th className="px-4 py-2 text-right font-medium text-xs uppercase tracking-wider">Allocated</th>
+                  <th className="px-4 py-2 text-right font-medium text-xs uppercase tracking-wider">Expenses</th>
                   <th className="px-4 py-2 text-right font-medium text-xs uppercase tracking-wider">Mgmt Fee</th>
                   <th className="px-4 py-2 text-right font-medium text-xs uppercase tracking-wider font-bold">Total</th>
                 </tr>
@@ -146,6 +149,7 @@ export default function LLCStatementPrintPage({ params }: { params: Promise<{ ll
                     </td>
                     <td className="px-4 py-2 text-right text-gray-700">{formatCurrency(Number(li.labor_amount))}</td>
                     <td className="px-4 py-2 text-right text-gray-500">{li.spread_amount ? formatCurrency(Number(li.spread_amount)) : '—'}</td>
+                    <td className="px-4 py-2 text-right text-gray-500">{li.expense_amount ? formatCurrency(Number(li.expense_amount)) : '—'}</td>
                     <td className="px-4 py-2 text-right text-gray-500">{formatCurrency(Number(li.mgmt_fee_amount))}</td>
                     <td className="px-4 py-2 text-right font-semibold text-gray-900">{formatCurrency(Number(li.total_amount))}</td>
                   </tr>
@@ -162,6 +166,12 @@ export default function LLCStatementPrintPage({ params }: { params: Promise<{ ll
               <span className="text-gray-500">Labor + allocated</span>
               <span>{formatCurrency(laborTotal)}</span>
             </div>
+            {expenseTotal > 0 && (
+              <div className="flex justify-between py-2 border-b border-gray-200 text-sm">
+                <span className="text-gray-500">Reimbursed expenses</span>
+                <span>{formatCurrency(expenseTotal)}</span>
+              </div>
+            )}
             <div className="flex justify-between py-2 border-b border-gray-200 text-sm">
               <span className="text-gray-500">Management fee</span>
               <span>{formatCurrency(mgmtTotal)}</span>
