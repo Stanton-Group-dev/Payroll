@@ -124,6 +124,16 @@ it describes the live app, not a future merge.
   `gross = regular_wages + ot_wages + phone + mileage + other_adjustments − advances`; the tax/WC
   base excludes reimbursements. `required_prefund = gross + payroll_tax + workers_comp`, **plus the
   mgmt fee iff `prefund_includes_mgmt_fee` is true** (live config flag, default true).
+- **The LLC statement bills the FULL prefund (2026‑06‑25, `DECISIONS_LOG.md` §0.20 — reverses the old
+  "prefund is reference‑only" §1).** Each property's `total_cost` now folds in its share of employer
+  **payroll tax + workers' comp**, allocated by each employee's wage placement (`propTaxCost` /
+  `propWcCost` in `calculations.ts`: direct labor → their properties; salaried/overhead/suppressed →
+  unit‑weighted spread). The **mgmt‑fee base stays wages** (`labor + spread`), mirroring the prefund,
+  so `Σ property total_cost = required_prefund + advances` (advances bill at full freight and are
+  recovered from the employee, not by under‑billing the LLC). Tax/WC are **folded into the property
+  total — no separate customer line.** Companion rule: labor on a **suppressed** placeholder property
+  is no longer written off — it joins the overhead spread (a non‑asset's labor lands on the real
+  billable assets). Stored on `payroll_weekly_property_costs.tax_cost`/`wc_cost`.
 - **Do not fork the calc.** ADP export and reconciliation **route through the engine** (PRP‑02,
   `d033933`) — they no longer re‑derive gross in local loops. When you touch pay math, push it into
   the engine; never add a parallel derivation.

@@ -229,6 +229,8 @@ export function usePayrollWeekReview(weekId: string) {
         labor_cost: pc.labor_cost,
         spread_cost: pc.spread_cost,
         expense_cost: pc.expense_cost,
+        tax_cost: pc.tax_cost,
+        wc_cost: pc.wc_cost,
         total_cost: pc.total_cost,
         cost_per_unit: pc.cost_per_unit,
       }))

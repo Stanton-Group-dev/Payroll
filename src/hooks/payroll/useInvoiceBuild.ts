@@ -43,6 +43,10 @@ export interface InvoicePropLine {
   spread_cost: number
   mileage_cost: number
   expense_cost: number
+  /** Employer payroll tax + workers' comp billed to this property, folded into the
+   *  amount/total (no separate customer line). From the engine's PropertyCostSummary. */
+  tax_cost: number
+  wc_cost: number
   mgmt_fee: number
   total_cost: number
   llc: string
@@ -160,7 +164,8 @@ export function useInvoiceBuild(weekId: string) {
     const invoices: BuiltInvoice[] = Object.entries(byLlc).map(([llc, props]) => ({
       llc,
       props: props.sort((a, b) => b.total_cost - a.total_cost),
-      amount: props.reduce((s, p) => s + p.labor_cost + p.spread_cost + p.mileage_cost + p.expense_cost, 0),
+      // Burden (tax + WC) is folded into the billable amount — no separate customer line.
+      amount: props.reduce((s, p) => s + p.labor_cost + p.spread_cost + p.mileage_cost + p.expense_cost + p.tax_cost + p.wc_cost, 0),
       mgmt: props.reduce((s, p) => s + p.mgmt_fee, 0),
       total: props.reduce((s, p) => s + p.total_cost, 0),
     })).sort((a, b) => b.total - a.total)

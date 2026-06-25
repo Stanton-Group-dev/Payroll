@@ -110,7 +110,7 @@ export default function InvoicesPage({ params }: { params: Promise<{ weekId: str
                     <thead>
                       <tr className="bg-[var(--bg-section)] text-[var(--muted)]">
                         <th className="px-4 py-2 text-left font-medium">Property</th>
-                        <th className="px-4 py-2 text-right font-medium">Labor</th>
+                        <th className="px-4 py-2 text-right font-medium">Labor + Burden</th>
                         <th className="px-4 py-2 text-right font-medium">Spread</th>
                         <th className="px-4 py-2 text-right font-medium">Expenses</th>
                         <th className="px-4 py-2 text-right font-medium">Mgmt Fee (10%)</th>

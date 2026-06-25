@@ -74,6 +74,12 @@ export interface PropertyCostSummary {
    *  Direct allocations land on their property; unit-weighted ones are spread by unit
    *  count. Pass-through — billed at cost, NOT in the management-fee base (like mileage). */
   expense_cost: number
+  /** Employer payroll tax billed to this property — the W2 tax burden for the wages billed
+   *  here, allocated by each employee's wage placement (direct labor + unit-weighted spread).
+   *  Folded into total_cost so the LLC statement collects the full prefund. */
+  tax_cost: number
+  /** Employer workers' comp billed to this property, allocated exactly like tax_cost. */
+  wc_cost: number
   mgmt_fee: number
   total_cost: number
   cost_per_unit: number
@@ -179,6 +185,10 @@ export function calculatePayroll(
   // property-agnostic, computed from raw time entries below); the cost just isn't billed
   // to anyone. This is the single calc-boundary chokepoint, so every caller (review,
   // invoices, ADP, command bar) inherits it.
+  // Capture suppressed property ids before dropping them: labor logged against a suppressed
+  // placeholder (e.g. a "…Bookkeeping" aggregate) is NOT written off — it joins the
+  // overhead-spread pool below and bills across the real billable assets by unit count.
+  const suppressedPropertyIds = new Set(properties.filter(p => p.is_suppressed).map(p => p.id))
   properties = properties.filter(p => !p.is_suppressed)
   const effectivePayrollTaxRate   = settings?.payrollTaxRate    ?? PAYROLL_TAX_RATE
   const effectiveWorkersCompRate  = settings?.workersCompRate   ?? WORKERS_COMP_RATE
@@ -343,10 +353,17 @@ export function calculatePayroll(
     })
   }
 
-  // Method A: Direct labor by property. Also capture each employee's per-property
-  // labor hours — the fallback weight for mileage when miles weren't logged per row.
+  // Method A: Direct labor by property. Also capture each employee's per-property labor
+  // COST (the basis for billing their employer burden by wage placement, below) and HOURS
+  // (the fallback weight for mileage when miles weren't logged per row).
   const propLaborCost: Record<string, number> = {}
+  const empLaborByProp: Record<string, Record<string, number>> = {}
   const empHoursByProp: Record<string, Record<string, number>> = {}
+  // Labor logged against a suppressed placeholder property: never billed to the placeholder
+  // and never written off — accumulated here, then folded into the overhead-spread pool so it
+  // bills across the real billable assets by unit count (per-employee total kept for burden).
+  let suppressedSpread = 0
+  const empSuppressedLabor: Record<string, number> = {}
   for (const entry of entries) {
     if (!entry.property_id) continue
     const emp = employeeMap[entry.employee_id]
@@ -354,7 +371,14 @@ export function calculatePayroll(
     const rate = emp.hourly_rate ?? 0
     // OT premium flows into the property's labor cost too (it bears the actual wage).
     const cost = (entry.regular_hours ?? 0) * rate + (entry.ot_hours ?? 0) * rate * otMultiplier(emp.type, emp.department, emp.ot_allowed)
+    if (suppressedPropertyIds.has(entry.property_id)) {
+      suppressedSpread += cost
+      empSuppressedLabor[entry.employee_id] = (empSuppressedLabor[entry.employee_id] ?? 0) + cost
+      continue
+    }
     propLaborCost[entry.property_id] = (propLaborCost[entry.property_id] ?? 0) + cost
+    ;(empLaborByProp[entry.employee_id] ??= {})[entry.property_id] =
+      (empLaborByProp[entry.employee_id][entry.property_id] ?? 0) + cost
     const hours = (entry.regular_hours ?? 0) + (entry.ot_hours ?? 0)
     if (hours > 0) {
       ;(empHoursByProp[entry.employee_id] ??= {})[entry.property_id] =
@@ -379,15 +403,20 @@ export function calculatePayroll(
   // property. They're already PAID in the per-employee loop above; here their cost is
   // billed like salaried — spread across billable properties by unit count. Use the same
   // wage basis as direct labor (OT premium per the employee's classification).
+  const empOverheadLabor: Record<string, number> = {}
   const overheadSpread = entries
     .filter(e => e.is_overhead_spread)
     .reduce((sum, e) => {
       const emp = employeeMap[e.employee_id]
       if (!emp) return sum
       const rate = emp.hourly_rate ?? 0
-      return sum + (e.regular_hours ?? 0) * rate + (e.ot_hours ?? 0) * rate * otMultiplier(emp.type, emp.department, emp.ot_allowed)
+      const cost = (e.regular_hours ?? 0) * rate + (e.ot_hours ?? 0) * rate * otMultiplier(emp.type, emp.department, emp.ot_allowed)
+      empOverheadLabor[e.employee_id] = (empOverheadLabor[e.employee_id] ?? 0) + cost
+      return sum + cost
     }, 0)
-  const spreadTotal = adjustmentSpread + salariedSpread + overheadSpread
+  // Suppressed-placeholder labor (captured in Method A) joins the spread pool — the
+  // "no write-offs" rule: a non-asset's labor lands on the real assets, never vanishes.
+  const spreadTotal = adjustmentSpread + salariedSpread + overheadSpread + suppressedSpread
 
   // Department breakdown of the spread pool (display-only, customer billing).
   // Only the salaried-pay portion is attributed to departments — via each salaried
@@ -408,8 +437,9 @@ export function calculatePayroll(
       spreadDeptDollars[SPREAD_OTHER_DEPT] = (spreadDeptDollars[SPREAD_OTHER_DEPT] ?? 0) + pay
     }
   }
-  if (overheadSpread + adjustmentSpread !== 0) {
-    spreadDeptDollars[SPREAD_OTHER_DEPT] = (spreadDeptDollars[SPREAD_OTHER_DEPT] ?? 0) + overheadSpread + adjustmentSpread
+  if (overheadSpread + adjustmentSpread + suppressedSpread !== 0) {
+    spreadDeptDollars[SPREAD_OTHER_DEPT] =
+      (spreadDeptDollars[SPREAD_OTHER_DEPT] ?? 0) + overheadSpread + adjustmentSpread + suppressedSpread
   }
   // Ordered department weights (biggest first); 'Other' is allowed but kept distinct.
   const spreadDeptWeights = Object.entries(spreadDeptDollars)
@@ -511,6 +541,44 @@ export function calculatePayroll(
     }
   }
 
+  // Employer burden (payroll tax + workers' comp) billed back to the LLCs. Each W2 employee's
+  // tax/WC is allocated onto properties the SAME way their wages were billed: the direct-labor
+  // portion follows their per-property labor; the salaried/overhead/suppressed portion follows
+  // the unit-weighted spread. So the full burden bills back (folded into total_cost, mirroring
+  // required_prefund = gross + tax + WC + fee) without smearing a contractor's untaxed
+  // buildings with W2 tax. An employee with no billable wages to attach to is skipped
+  // (paid-but-unbilled, by design — same as no-property mileage/expense).
+  const propTaxCost: Record<string, number> = {}
+  const propWcCost: Record<string, number> = {}
+  for (const s of employee_summaries) {
+    if (s.payroll_tax === 0 && s.workers_comp === 0) continue
+    const emp = employeeMap[s.employee_id]
+    const direct = empLaborByProp[s.employee_id] ?? {}
+    const directTotal = Object.values(direct).reduce((a, b) => a + b, 0)
+    const spreadWage =
+      (emp?.type === 'salaried' && emp.weekly_rate ? Number(emp.weekly_rate) : 0) +
+      (empOverheadLabor[s.employee_id] ?? 0) +
+      (empSuppressedLabor[s.employee_id] ?? 0)
+    const totalPlacement = directTotal + spreadWage
+    if (totalPlacement <= 0) continue
+    // Direct portion → the properties this employee actually worked.
+    for (const [propId, wage] of Object.entries(direct)) {
+      const frac = wage / totalPlacement
+      propTaxCost[propId] = (propTaxCost[propId] ?? 0) + s.payroll_tax * frac
+      propWcCost[propId] = (propWcCost[propId] ?? 0) + s.workers_comp * frac
+    }
+    // Spread portion → unit-weighted across billable properties (like the wages themselves).
+    if (spreadWage > 0 && billableUnits) {
+      for (const prop of properties) {
+        if (prop.include_in_invoicing === false) continue
+        const frac = (spreadWage * ((prop.total_units ?? 0) / billableUnits)) / totalPlacement
+        if (frac === 0) continue
+        propTaxCost[prop.id] = (propTaxCost[prop.id] ?? 0) + s.payroll_tax * frac
+        propWcCost[prop.id] = (propWcCost[prop.id] ?? 0) + s.workers_comp * frac
+      }
+    }
+  }
+
   // Build property cost summaries
   const property_costs: PropertyCostSummary[] = []
   for (const prop of properties) {
@@ -518,12 +586,15 @@ export function calculatePayroll(
     const spread = propSpreadCost[prop.id] ?? 0
     const mileage = propMileageCost[prop.id] ?? 0
     const expense = propExpenseCost[prop.id] ?? 0
+    const tax = propTaxCost[prop.id] ?? 0
+    const wc = propWcCost[prop.id] ?? 0
     // C-5: use the week's start date so the fee rate is point-in-time.
     const feeRate = getMgmtFeeRate(prop.portfolio_id, mgmtFeeConfigs, weekStart)
-    // Mileage and reimbursed expenses are pass-through: billed to the property at cost,
-    // NOT in the fee base. (Phone/tools spread remains in the base — it's general overhead.)
+    // Mileage and reimbursed expenses are pass-through: billed at cost, NOT in the fee base.
+    // Employer tax/WC are also outside the fee base — the fee is charged on wages, mirroring
+    // the prefund (gross + tax + WC + fee), so we don't charge a fee on the burden.
     const mgmt_fee = (labor + spread) * feeRate
-    const total_cost = labor + spread + mileage + expense + mgmt_fee
+    const total_cost = labor + spread + mileage + expense + tax + wc + mgmt_fee
     property_costs.push({
       property_id: prop.id,
       property_code: prop.code,
@@ -534,6 +605,8 @@ export function calculatePayroll(
       spread_cost: round2(spread),
       mileage_cost: round2(mileage),
       expense_cost: round2(expense),
+      tax_cost: round2(tax),
+      wc_cost: round2(wc),
       mgmt_fee: round2(mgmt_fee),
       total_cost: round2(total_cost),
       cost_per_unit: prop.total_units ? round2(total_cost / prop.total_units) : 0,

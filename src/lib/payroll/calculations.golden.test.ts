@@ -157,14 +157,29 @@ describe('calculatePayroll — golden week 2026-06-08', () => {
     expect(cents(e.workers_comp)).toBe(cents(33))  // 1100 * 0.03
   })
 
-  it('property_costs[0]: labor_cost and mgmt_fee', () => {
+  it('property_costs[0]: labor, mgmt_fee, and employer burden (tax + WC) billed to the property', () => {
     const p = result.property_costs[0]
     // labor: 40*20 + 10*20*1.5 = 800 + 300 = 1100
     expect(cents(p.labor_cost)).toBe(cents(1100))
-    // mgmt_fee: (1100 + 0) * 0.10 = 110
+    // mgmt_fee: (1100 + 0) * 0.10 = 110 — fee base is wages only, NOT the burden
     expect(cents(p.mgmt_fee)).toBe(cents(110))
     // no expense_reimbursement adjustments this week → nothing billed through
     expect(cents(p.expense_cost)).toBe(cents(0))
+    // Employer burden follows the wages — all of e1's labor is on p1, so all the tax/WC
+    // lands here: tax 88 (1100 * 0.08), WC 33 (1100 * 0.03).
+    expect(cents(p.tax_cost)).toBe(cents(88))
+    expect(cents(p.wc_cost)).toBe(cents(33))
+    // total_cost folds in the burden: 1100 labor + 88 tax + 33 WC + 110 mgmt = 1331
+    expect(cents(p.total_cost)).toBe(cents(1331))
+  })
+
+  it('Σ property total_cost = required_prefund + advances (full freight billed)', () => {
+    // The customer is billed full labor + burden + fee; the $100 advance was paid early to
+    // the employee and is recovered from them, NOT by under-billing the LLC. So billed
+    // (1331) = prefund (1231) + advance (100).
+    const billed = result.property_costs.reduce((s, p) => s + p.total_cost, 0)
+    expect(cents(billed)).toBe(cents(1331))
+    expect(cents(result.required_prefund)).toBe(cents(1231))
   })
 
   it('total_mgmt_fee is property-authoritative (OD-4)', () => {
@@ -277,8 +292,12 @@ describe('calculatePayroll — expense bill-through', () => {
     expect(cents(result.property_costs[0].mgmt_fee)).toBe(cents(110))
   })
 
-  it('total_cost folds in the expense: 1100 labor + 80 expense + 110 mgmt = 1290', () => {
-    expect(cents(result.property_costs[0].total_cost)).toBe(cents(1290))
+  it('total_cost folds in expense + burden: 1100 labor + 80 expense + 88 tax + 33 WC + 110 mgmt = 1411', () => {
+    const p = result.property_costs[0]
+    // taxable base = gross 1180 − 80 nontax expense reimbursement = 1100 → tax 88, WC 33
+    expect(cents(p.tax_cost)).toBe(cents(88))
+    expect(cents(p.wc_cost)).toBe(cents(33))
+    expect(cents(p.total_cost)).toBe(cents(1411))
   })
 
   it('employee is reimbursed: the $80 lands in gross_pay (other_adjustments)', () => {

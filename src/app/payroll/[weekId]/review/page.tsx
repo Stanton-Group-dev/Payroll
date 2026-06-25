@@ -284,6 +284,7 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
                       <th className="px-3 py-2.5 text-right font-medium">Spread</th>
                       <th className="px-3 py-2.5 text-right font-medium">Mileage</th>
                       <th className="px-3 py-2.5 text-right font-medium">Expenses</th>
+                      <th className="px-3 py-2.5 text-right font-medium">Tax/WC</th>
                       <th className="px-3 py-2.5 text-right font-medium">Mgmt Fee (10%)</th>
                       <th className="px-3 py-2.5 text-right font-medium font-bold">Total Cost</th>
                       <th className="px-3 py-2.5 text-right font-medium">$/Unit</th>
@@ -301,6 +302,7 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
                         <td className="px-3 py-2 text-right">{pc.spread_cost ? formatCurrency(pc.spread_cost) : '—'}</td>
                         <td className="px-3 py-2 text-right">{pc.mileage_cost ? formatCurrency(pc.mileage_cost) : '—'}</td>
                         <td className="px-3 py-2 text-right">{pc.expense_cost ? formatCurrency(pc.expense_cost) : '—'}</td>
+                        <td className="px-3 py-2 text-right">{(pc.tax_cost + pc.wc_cost) ? formatCurrency(pc.tax_cost + pc.wc_cost) : '—'}</td>
                         <td className="px-3 py-2 text-right">{formatCurrency(pc.mgmt_fee)}</td>
                         <td className="px-3 py-2 text-right font-semibold">{formatCurrency(pc.total_cost)}</td>
                         <td className="px-3 py-2 text-right text-[var(--muted)]">{pc.cost_per_unit ? formatCurrency(pc.cost_per_unit) : '—'}</td>

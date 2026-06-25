@@ -273,7 +273,7 @@ export default function StatementPrintPage({ params }: { params: Promise<{ weekI
                       {p.property_code} - {p.address || p.property_name.replace(/^S\d+\s*[-–]\s*/, '')}
                     </td>
                     <td />
-                    <td className="px-3 py-2 text-right">{formatCurrency(p.labor_cost + p.spread_cost + p.mileage_cost + p.expense_cost)}</td>
+                    <td className="px-3 py-2 text-right">{formatCurrency(p.labor_cost + p.spread_cost + p.mileage_cost + p.expense_cost + p.tax_cost + p.wc_cost)}</td>
                     <td className="px-3 py-2 text-right text-[var(--muted)]">{formatCurrency(p.mgmt_fee)}</td>
                     <td className="px-4 py-2 text-right font-semibold">{formatCurrency(p.total_cost)}</td>
                   </tr>
