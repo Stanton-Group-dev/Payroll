@@ -167,9 +167,11 @@ function NavSection({
 export default function PayrollLayout({ children }: { children: React.ReactNode }) {
   return (
     <SelectedWeekProvider>
-      <div className="flex min-h-screen bg-[var(--paper)]">
+      {/* print:* — drop the flex shell to plain block flow and stop the scroll
+          clip so multi-page statements/invoices paginate instead of cutting off. */}
+      <div className="flex min-h-screen bg-[var(--paper)] print:block print:min-h-0">
         <Sidebar />
-        <main className="flex-1 overflow-auto">{children}</main>
+        <main className="flex-1 overflow-auto print:overflow-visible">{children}</main>
       </div>
     </SelectedWeekProvider>
   )

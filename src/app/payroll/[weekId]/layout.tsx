@@ -32,9 +32,9 @@ export default function WeekLayout({
   }, [weekId, setSelectedWeekId])
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Week sub-nav */}
-      <div className="bg-white border-b border-[var(--divider)] px-6">
+    <div className="flex flex-col h-full print:block print:h-auto">
+      {/* Week sub-nav — screen chrome only; never in the printed PDF. */}
+      <div className="bg-white border-b border-[var(--divider)] px-6 print:hidden">
         <div className="flex items-center gap-1 -mb-px">
           <Link
             href="/payroll"
@@ -63,8 +63,8 @@ export default function WeekLayout({
         </div>
       </div>
 
-      {/* Week utility bar — quick links to week-scoped global pages */}
-      <div className="bg-[var(--bg-section)] border-b border-[var(--divider)] px-6 py-1.5 flex items-center gap-4">
+      {/* Week utility bar — quick links to week-scoped global pages (screen only) */}
+      <div className="bg-[var(--bg-section)] border-b border-[var(--divider)] px-6 py-1.5 flex items-center gap-4 print:hidden">
         <span className="text-xs text-[var(--muted)] font-medium uppercase tracking-wide mr-1">This week:</span>
         <Link
           href={`/payroll/corrections?week=${weekId}`}
@@ -89,7 +89,7 @@ export default function WeekLayout({
         </Link>
       </div>
 
-      <div className="flex-1 overflow-auto">{children}</div>
+      <div className="flex-1 overflow-auto print:overflow-visible">{children}</div>
     </div>
   )
 }
