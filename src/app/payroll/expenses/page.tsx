@@ -21,7 +21,7 @@ import { usePayrollEmployees } from '@/hooks/payroll/usePayrollEmployees'
 import { usePayrollWeeks } from '@/hooks/payroll/usePayrollWeeks'
 import { useProperties } from '@/hooks/payroll/useProperties'
 import { useAuth } from '@/hooks/payroll/useAuth'
-import type { PayrollExpenseSubmission, ExpenseType, ExpensePaymentMethod, ExpenseAllocationMethod } from '@/lib/supabase/types'
+import type { PayrollExpenseSubmission, ExpenseType, ExpensePaymentMethod, ExpenseAllocationMethod, PayrollWeek } from '@/lib/supabase/types'
 import { ApprovalTab } from './ApprovalTab'
 import { BookkeepingTab } from './BookkeepingTab'
 
@@ -397,8 +397,20 @@ function ItemCard({
 
 // ── Submission History Row ────────────────────────────────────────────────────
 
-function SubmissionRow({ sub }: { sub: PayrollExpenseSubmission }) {
+function SubmissionRow({
+  sub,
+  weeks,
+  canEdit,
+  onReassignWeek,
+}: {
+  sub: PayrollExpenseSubmission
+  weeks: PayrollWeek[]
+  canEdit: boolean
+  onReassignWeek: (submissionId: string, weekId: string) => Promise<void>
+}) {
   const [open, setOpen] = useState(false)
+  const [reassigning, setReassigning] = useState(false)
+  const [reassignErr, setReassignErr] = useState<string | null>(null)
   const statusMap: Record<string, string> = {
     pending: 'flagged',
     approved: 'approved',
@@ -410,6 +422,24 @@ function SubmissionRow({ sub }: { sub: PayrollExpenseSubmission }) {
   const weekLabel = sub.week?.week_start
     ? `Week of ${format(parseISO(sub.week.week_start), 'MMM d')}`
     : 'No week assigned'
+
+  // Only weeks that aren't locked can be a move target — and the expense can only be
+  // moved at all if its current week is itself unlocked (or unassigned).
+  const writableWeeks = weeks.filter(w => w.status === 'draft' || w.status === 'corrections_complete')
+  const currentWritable = !sub.payroll_week_id || writableWeeks.some(w => w.id === sub.payroll_week_id)
+
+  const handleReassign = async (weekId: string) => {
+    if (!weekId || weekId === sub.payroll_week_id) return
+    setReassigning(true)
+    setReassignErr(null)
+    try {
+      await onReassignWeek(sub.id, weekId)
+    } catch (e) {
+      setReassignErr(e instanceof Error ? e.message : 'Could not move week.')
+    } finally {
+      setReassigning(false)
+    }
+  }
 
   return (
     <div className="border border-[var(--border)] mb-2">
@@ -468,6 +498,34 @@ function SubmissionRow({ sub }: { sub: PayrollExpenseSubmission }) {
           {sub.notes && (
             <p className="text-xs text-[var(--muted)] mt-2 pt-2 border-t border-[var(--divider)]">Note: {sub.notes}</p>
           )}
+
+          {/* Reassign the payroll week — moves the submission + its reimbursement adjustments. */}
+          {canEdit && sub.status !== 'rejected' && (
+            <div className="mt-2 pt-2 border-t border-[var(--divider)] flex items-center gap-2 flex-wrap">
+              <span className="text-xs text-[var(--muted)]">Billed week:</span>
+              {currentWritable ? (
+                <>
+                  <FormSelect
+                    value={sub.payroll_week_id ?? ''}
+                    disabled={reassigning}
+                    onChange={e => handleReassign(e.target.value)}
+                    className="text-xs py-1 w-auto"
+                  >
+                    {!sub.payroll_week_id && <option value="">— unassigned —</option>}
+                    {writableWeeks.map(w => (
+                      <option key={w.id} value={w.id}>Week of {format(parseISO(w.week_start), 'MMM d, yyyy')}</option>
+                    ))}
+                  </FormSelect>
+                  {reassigning && <span className="text-xs text-[var(--muted)]">Moving…</span>}
+                </>
+              ) : (
+                <span className="text-xs text-[var(--warning)]">
+                  {weekLabel} is locked (approved/invoiced) — correct via a carry-forward in the open week.
+                </span>
+              )}
+              {reassignErr && <span className="text-xs text-[var(--error)]">{reassignErr}</span>}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -477,7 +535,7 @@ function SubmissionRow({ sub }: { sub: PayrollExpenseSubmission }) {
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
 export default function ExpensesPage() {
-  const { profile } = useAuth()
+  const { profile, isManager } = useAuth()
   const { employees } = usePayrollEmployees()
   const { weeks } = usePayrollWeeks()
   const { properties } = useProperties()
@@ -490,6 +548,7 @@ export default function ExpensesPage() {
     error: hookError,
     refetch,
     submitBatch,
+    reassignWeek,
   } = useExpenseSubmissions(selectedEmployeeId || undefined)
 
   const cutoffInfo = useCutoffInfo(config)
@@ -870,7 +929,15 @@ export default function ExpensesPage() {
               {loading ? (
                 <div className="text-sm text-[var(--muted)] py-4">Loading…</div>
               ) : (
-                submissions.map(sub => <SubmissionRow key={sub.id} sub={sub} />)
+                submissions.map(sub => (
+                  <SubmissionRow
+                    key={sub.id}
+                    sub={sub}
+                    weeks={weeks}
+                    canEdit={isManager}
+                    onReassignWeek={reassignWeek}
+                  />
+                ))
               )}
             </div>
           )}

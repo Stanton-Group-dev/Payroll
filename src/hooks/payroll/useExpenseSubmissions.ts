@@ -11,6 +11,7 @@ import type {
   GasAllocationEntry,
 } from '@/lib/supabase/types'
 import { addDays, format, isAfter, parseISO, setHours, setMinutes, startOfDay } from 'date-fns'
+import { assertWeekWritable } from '@/lib/payroll/weekLock'
 
 /** One leg of a custom split — a property and its share (percent, as a form string). */
 export interface DraftSplitEntry {
@@ -334,6 +335,45 @@ export function useExpenseSubmissions(employeeIdFilter?: string) {
     await fetchConfig()
   }, [config, fetchConfig])
 
+  /**
+   * Move an approved (or pending) expense submission to a different payroll week, taking
+   * its reimbursement adjustments along so the billing follows. Refuses if EITHER the
+   * current or the target week is locked (approved/invoiced/statement_sent) — you can't
+   * pull a billed expense out of a sent statement, nor push one into a locked week; those
+   * go via a carry-forward instead. Use when an expense was approved against the wrong week.
+   */
+  const reassignWeek = useCallback(async (submissionId: string, newWeekId: string) => {
+    const supabase = createClient()
+    const { data: sub, error: subErr } = await supabase
+      .from('payroll_expense_submissions')
+      .select('payroll_week_id')
+      .eq('id', submissionId)
+      .single()
+    if (subErr) throw new Error(subErr.message)
+    const sourceWeekId = sub?.payroll_week_id ?? null
+    if (sourceWeekId === newWeekId) return
+
+    // Both ends must be writable: out of the old week, into the new one.
+    await assertWeekWritable(supabase, sourceWeekId)
+    await assertWeekWritable(supabase, newWeekId)
+
+    // Move the billable reimbursement adjustment(s) first, then the submission record.
+    const { error: adjErr } = await supabase
+      .from('payroll_adjustments')
+      .update({ payroll_week_id: newWeekId })
+      .eq('expense_submission_id', submissionId)
+      .eq('is_active', true)
+    if (adjErr) throw new Error(adjErr.message)
+
+    const { error: updErr } = await supabase
+      .from('payroll_expense_submissions')
+      .update({ payroll_week_id: newWeekId })
+      .eq('id', submissionId)
+    if (updErr) throw new Error(updErr.message)
+
+    await fetchSubmissions()
+  }, [fetchSubmissions])
+
   return {
     submissions,
     config,
@@ -342,5 +382,6 @@ export function useExpenseSubmissions(employeeIdFilter?: string) {
     refetch: fetchSubmissions,
     submitBatch,
     saveConfig,
+    reassignWeek,
   }
 }
