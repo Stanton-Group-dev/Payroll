@@ -1,5 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // Self-contained server output for the Railway Docker runner (Vercel→Railway, 2026-06-24).
+  output: 'standalone',
   reactStrictMode: true,
   // Keep the headless-Chrome packages out of the bundler so the chromium binary
   // ships intact to the serverless PDF route (/api/payroll/pdf).
