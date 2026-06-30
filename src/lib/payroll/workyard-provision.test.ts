@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   planProvision,
+  executeProvision,
   buildProjectName,
   buildCostCodeName,
   type ProvisionInputs,
@@ -59,5 +60,38 @@ describe('workyard-provision plan (dry-run)', () => {
     expect(plan.costCode.payload.project_ids).toEqual(expect.arrayContaining([101, 102, 103]))
     expect(plan.costCode.payload.include_all_projects).toBe(false)
     expect(plan.costCode.payload.code).toBe('S0099')
+  })
+})
+
+// ── Route CF-8: executeProvision dry-run (no network) ────────────────────────
+//
+// These tests cover the pure branch of executeProvision (apply:false). The live
+// branch (apply:true) calls the Workyard API and is integration-tested against
+// the real org; it is not exercised here. This mirrors the CF-8 DoD check:
+// "Endpoint dry-run: existing object → skip, new object → create."
+
+describe('executeProvision preview (apply:false)', () => {
+  it('returns preview action and null ids when apply is false — new building', async () => {
+    const plan = planProvision(inputs, empty)
+    const result = await executeProvision(inputs, plan, { apply: false })
+    expect(result.projectAction).toBe('preview')
+    expect(result.costCodeAction).toBe('preview')
+    expect(result.workyardProjectId).toBeNull()
+    expect(result.workyardCostCodeId).toBeNull()
+  })
+
+  it('returns preview action with matched ids when both objects already exist', async () => {
+    const existing: ExistingWorkyard = {
+      projects: [{ id: 555, name: buildProjectName(inputs.sCode, inputs.address) }],
+      costCodes: [{ id: 777, code: inputs.sCode, name: 'whatever' }],
+    }
+    const plan = planProvision(inputs, existing)
+    expect(plan.project.action).toBe('skip')
+    expect(plan.costCode.action).toBe('skip')
+    const result = await executeProvision(inputs, plan, { apply: false })
+    expect(result.projectAction).toBe('preview')
+    // Matched ids are carried through on the plan but preview returns them as-is.
+    expect(result.workyardProjectId).toBe(555)
+    expect(result.workyardCostCodeId).toBe(777)
   })
 })

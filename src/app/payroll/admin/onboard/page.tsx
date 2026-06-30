@@ -23,6 +23,11 @@ interface ApplySummary {
   premium: boolean
   propertyUpdated: boolean
   logged: boolean
+  workyardProjectId: number | null
+  workyardCostCodeId: number | null
+  workyardProjectAction: string | null
+  workyardCostCodeAction: string | null
+  manualSteps: string[]
 }
 
 export default function OnboardWizardPage() {
@@ -75,7 +80,16 @@ export default function OnboardWizardPage() {
     setApplying(true)
     setApplyError(null)
     const supabase = createClient()
-    const summary: ApplySummary = { premium: false, propertyUpdated: false, logged: false }
+    const summary: ApplySummary = {
+      premium: false,
+      propertyUpdated: false,
+      logged: false,
+      workyardProjectId: null,
+      workyardCostCodeId: null,
+      workyardProjectAction: null,
+      workyardCostCodeAction: null,
+      manualSteps: [],
+    }
     try {
       if (premiumOn) {
         const amt = parseFloat(premiumAmount)
@@ -91,19 +105,80 @@ export default function OnboardWizardPage() {
       if (ppErr) throw new Error(`Payroll property update failed: ${ppErr.message}`)
       summary.propertyUpdated = true
 
-      // Best-effort audit row. The table is staged (migration 20260623_02); if it
-      // isn't applied yet, PostgREST returns an error object (no throw) and we
-      // simply leave logged=false.
-      const userId = (await supabase.auth.getUser()).data.user?.id ?? null
-      const { error: logErr } = await supabase.from('payroll_workyard_provision_log').insert({
-        property_code: sCode,
-        workyard_project_id: null,
-        workyard_cost_code_id: null,
-        project_action: 'preview',
-        cost_code_action: 'preview',
-        created_by: userId,
-      })
-      if (!logErr) summary.logged = true
+      // ── Workyard provisioning ─────────────────────────────────────────────
+      // Call the server-side provisioning endpoint (CF-8). This creates the
+      // Workyard project (and attaches existing cost codes) idempotently, then
+      // logs an audit row. We only attempt live provisioning when geofence ids
+      // have been entered — the Workyard API requires them to create a project.
+      const parsedGeofenceIds = geofenceIds
+        .split(',')
+        .map(s => parseInt(s.trim(), 10))
+        .filter(n => !Number.isNaN(n))
+
+      const canProvision = parsedGeofenceIds.length > 0 && !!customer
+
+      if (canProvision) {
+        const provRes = await fetch('/api/workyard/provision-project', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            inputs: {
+              sCode,
+              address,
+              orgCustomerId: customer!.org_customer_id,
+              geofenceIds: parsedGeofenceIds,
+              // Vendor cluster project ids (CF-7) are not yet configurable via
+              // the UI — pass empty for now. The cost code will attach to the
+              // new project only; vendor-cluster attachment is a follow-up task.
+              vendorClusterProjectIds: [],
+            },
+            apply: true,
+          }),
+        })
+
+        if (!provRes.ok) {
+          const errBody = (await provRes.json().catch(() => ({}))) as { error?: string }
+          throw new Error(`Workyard provisioning failed: ${errBody.error ?? provRes.status}`)
+        }
+
+        const provData = (await provRes.json()) as {
+          result?: {
+            projectAction: string
+            costCodeAction: string
+            workyardProjectId: number | null
+            workyardCostCodeId: number | null
+          }
+          logId?: string | null
+          manualSteps?: string[]
+        }
+
+        if (provData.result) {
+          summary.workyardProjectId = provData.result.workyardProjectId
+          summary.workyardCostCodeId = provData.result.workyardCostCodeId
+          summary.workyardProjectAction = provData.result.projectAction
+          summary.workyardCostCodeAction = provData.result.costCodeAction
+        }
+        if (provData.logId) summary.logged = true
+        if (provData.manualSteps) summary.manualSteps = provData.manualSteps
+      } else {
+        // No geofence ids or unmapped LLC — fall back to writing a preview log
+        // row directly. The table may be staged; best-effort.
+        const { error: logErr } = await supabase.from('payroll_workyard_provision_log').insert({
+          property_code: sCode,
+          workyard_project_id: null,
+          workyard_cost_code_id: null,
+          project_action: 'preview',
+          cost_code_action: 'preview',
+          created_by: (await supabase.auth.getUser()).data.user?.id ?? null,
+        })
+        if (!logErr) summary.logged = true
+        summary.manualSteps = [
+          geofenceIds.trim()
+            ? 'Owner LLC is not mapped to a Workyard customer — add it in Workyard Customers settings, then re-run.'
+            : 'No geofence id(s) entered — add them and re-run to provision the Workyard project.',
+          'Cost-code creation via Workyard API returns 404 — create per-building cost codes manually in Workyard UI or via the onboarding scripts.',
+        ]
+      }
 
       setResult(summary)
       setStep(STEPS.length)
@@ -300,12 +375,41 @@ export default function OnboardWizardPage() {
               <ul className="list-disc pl-5 space-y-0.5">
                 <li>Payroll overlay {result.propertyUpdated ? 'updated' : 'not updated'}.</li>
                 <li>Travel premium {result.premium ? 'recorded (not yet applied — PRP-07)' : 'not set'}.</li>
+                {result.workyardProjectAction ? (
+                  <>
+                    <li>
+                      Workyard project:{' '}
+                      {result.workyardProjectAction === 'create'
+                        ? `created (id ${result.workyardProjectId})`
+                        : result.workyardProjectAction === 'skip'
+                          ? `already exists (id ${result.workyardProjectId}) — skipped`
+                          : result.workyardProjectAction}
+                    </li>
+                    <li>
+                      Workyard cost code:{' '}
+                      {result.workyardCostCodeAction === 'create'
+                        ? `created (id ${result.workyardCostCodeId})`
+                        : result.workyardCostCodeAction === 'skip'
+                          ? `already exists (id ${result.workyardCostCodeId}) — skipped`
+                          : result.workyardCostCodeAction}
+                    </li>
+                  </>
+                ) : (
+                  <li>Workyard project: deferred (no geofence ids or unmapped LLC).</li>
+                )}
                 <li>Audit row {result.logged ? 'written' : 'skipped (provision-log table staged)'}.</li>
               </ul>
             </InfoBlock>
-            <InfoBlock variant="default" title="To finish go-live">
-              Apply migrations 20260623_01–03, decide the geofence path (OD-1), then run the
-              Workyard provisioning, and ship PRP-07 to make the premium real.
+            {result.manualSteps.length > 0 && (
+              <InfoBlock variant="warning" title="Manual steps still required">
+                <ul className="list-disc pl-5 space-y-0.5">
+                  {result.manualSteps.map(s => <li key={s}>{s}</li>)}
+                </ul>
+              </InfoBlock>
+            )}
+            <InfoBlock variant="default" title="Next: ship PRP-07 to make the premium real">
+              The travel premium is recorded but the pay engine does not yet apply it. Ship
+              PRP-07 to wire it into pay and billing.
             </InfoBlock>
           </div>
         )}
