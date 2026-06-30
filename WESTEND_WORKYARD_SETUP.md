@@ -2,7 +2,7 @@
 
 **Source of truth:** payroll DB `properties` table (pulled 2026-06-17). All 26 buildings bill to **SREP Westend LLC**.
 **Why:** Workyard only has one consolidated `S0049 - West End Portfolio`, which mismaps — the app reads its S-code and dumps *all* Westend hours onto the single property `242-244 S Whitney`. Splitting into the real 26 buildings fixes attribution and unlocks per-building invoice itemization + dumpster analysis.
-**Note:** the Workyard API cannot create projects or cost codes (POST 404s) — this is **UI data entry**. Naming follows the existing convention (`S00xx - <building>` for projects, `<building> - Material Pickup` for codes) so the worker taps the building, never the S-code.
+**Note:** the Workyard API **can** create projects (`POST /projects`) and cost codes (`POST /orgs/{org_id}/cost_codes`) — scriptable, or do it in the UI. Naming follows the existing convention (`S00xx - <building>` for projects, `<building> - Material Pickup` for codes) so the worker taps the building, never the S-code.
 
 ---
 

@@ -3,7 +3,8 @@
 **Status (2026-06-19):** The automatable parts are **done**.
 - ✅ DB `properties` rows for S0042–S0067 already existed.
 - ✅ All 26 Workyard **projects** exist — 25 auto-created via API (ids 754218–754242), reusing the existing street geofences; `S0049` already existed.
-- ⏳ **26 Material-Pickup cost codes** — must be created in the Workyard **UI** (the API can't create cost codes — `POST /cost_codes` 404s).
+- ✅ **26 Material-Pickup cost codes (S0042–S0067) — DONE 2026-06-23.** Created via the Workyard UI **CSV bulk import** (Project Hub → Cost Codes → "+ Cost Code" → Import → Spreadsheet (CSV); template headers `Cost_Code_Name,Cost_Code_Number`; file `scripts/westend-material-costcodes.csv`), then **attached to each building's project + the 7 shared vendor/Office clusters via the API** (`scripts/wy-attach-westend-costcodes.mjs` — `PUT …/cost_codes/{id}` with `project_ids`). Verified: all 26 show 8 assigned projects. (There is **no cost-code *create* API** — `POST …/cost_codes` 404s on every path — but the CSV import + API attach made this a ~2-minute job.)
+- ✅ **Activity cost codes attached 2026-06-23** — all 26 Westend building projects now carry the **12 bilingual activity codes** (they previously had only their Materials code), as part of the org-wide canonical standard (**12 bilingual activity codes + each building's own Materials code**). See `DECISIONS_LOG.md` §0.22.
 - ⏳ **`S0049` project rename** — cosmetic, manual (`PUT /projects` 404s; can't rename via API).
 
 Once the cost codes exist, a supply run at any vendor → tap the building's cost code → the merged importer (OD-2) bills the hours to that building automatically.
@@ -14,10 +15,11 @@ Once the cost codes exist, a supply run at any vendor → tap the building's cos
 In Workyard, rename project **`S0049- West End Portfolio` → `S0049 - 242-244 S Whitney`**.
 *(Not required for billing — the importer already resolves it by the `S0049` prefix. Just so the worker sees the right building name.)*
 
-## Step B — Create 26 Material-Pickup cost codes
-For each row: **Code = the S-code**, **Name = "`<building> - Materials / Materiales`"**. Attach each to **its own project** *plus* the **10 vendor clusters** listed below (so it's tappable on a supply run at any of them).
+## Step B — Create 26 Material-Pickup cost codes (Workyard UI — no API)
+For each row: **Code = the S-code**, **Name = "`<building> - Materials / Materiales`"**. Attach each to **its own project** *plus* the **7 shared clusters** below (so it's tappable on a supply run at any of them).
 
-**The 10 vendor clusters:** Park Hardware · Home Depot - West Hartford · Home Depot - Bloomfield · Home Depot-Glastonbury · Lowes - Bloomfield · Bender Plumbing Supply - Hartford · Express Kitchens-Hardware store · New England Gypsum-Material pickup · All Waste- Garbage dumping · All Waste (Dumpyard)
+**The 7 shared clusters (the live, verified convention — copied from existing Materials codes S0029/S0030/S0031/S0040, 2026-06-23):** Office · Park Hardware · Home Depot-Glastonbury · Lowes - Bloomfield · Express Kitchens-Hardware store · New England Gypsum-Material pickup · All Waste- Garbage dumping
+> Earlier drafts listed 10 (adding Home Depot West Hartford/Bloomfield, Bender Plumbing, All Waste Dumpyard) — but **no existing Materials code is actually attached to those**, so match the 7 the real codes use.
 
 | Code | Cost-code name | Own project |
 |---|---|---|
@@ -57,7 +59,7 @@ For each row: **Code = the S-code**, **Name = "`<building> - Materials / Materia
 MSYS_NO_PATHCONV=1 infisical run --projectId=b974f539-54dc-4687-9afd-941d95d434c9 --env=prod --recursive \
   -- node scripts/wy-onboard-buildings.mjs --scode S0068 --name "12 Foo St" --customer <LLC_id> --geofence <geofence_id> --apply
 ```
-That creates the Workyard project (reusing the geofence you pass) and prints the one manual cost-code line to add in the UI. Ensure the DB `properties` row exists first (normal property onboarding).
+That creates the Workyard project (reusing the geofence you pass) and prints the cost-code line — which can be created via the API (`POST /orgs/{org_id}/cost_codes`) or added in the UI. Ensure the DB `properties` row exists first (normal property onboarding).
 
 ## Data nit to fix
 There are **two** `properties` rows with code `S0042` (one is a "Westend Portfolio - Bookkeeping" aggregate). Dedupe/recode the aggregate so S0042 resolution isn't ambiguous.

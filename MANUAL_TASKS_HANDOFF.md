@@ -2,11 +2,12 @@
 
 **Purpose:** the code + automation are done and merged. These are the remaining **manual** steps (mostly Workyard UI) needed to finish the rollout. Hand this to whoever owns Workyard data entry.
 
-**Background (1 paragraph):** When a worker does a supply run (Home Depot, Park Hardware, etc.), Workyard records the **vendor** as the project, and the worker taps a per-building **cost code** to say which building the materials are for. The payroll importer was just fixed to read that cost code and bill the hours to the right building (it parses the building S-code, e.g. `S0020`, out of the cost code). For this to work for a building, that building needs **(a)** a Workyard project and **(b)** a per-building "Materials" cost code attached to the vendor "clusters." The projects are now created automatically; **the cost codes must be created by hand** because Workyard's API can't create them.
+**Background (1 paragraph):** When a worker does a supply run (Home Depot, Park Hardware, etc.), Workyard records the **vendor** as the project, and the worker taps a per-building **cost code** to say which building the materials are for. The payroll importer was just fixed to read that cost code and bill the hours to the right building (it parses the building S-code, e.g. `S0020`, out of the cost code). For this to work for a building, that building needs **(a)** a Workyard project and **(b)** a per-building "Materials" cost code attached to the vendor "clusters." The projects are now created automatically; **the cost codes can be created via the Workyard API** (`POST /orgs/{org_id}/cost_codes`) or by hand in the UI.
 
 ---
 
 ## ✅ Already done (no action needed)
+- **Cost-code consolidation complete 2026-06-23** — every building project now carries the **12 bilingual activity codes** (Maint / Manten, Construction / Obra, Turnover / Vacante, Bulky / Voluminoso, Dumpster / Desborde, Office / Oficina, Pest / Plagas, Showings / Muestra, Snow / Nieve, Vehicles / Vehículo, Landscape / Jardín, Appliance / Aparato) **+ its own per-building "Materials" code**; the legacy numeric/zero-padded/empty duplicate codes were deleted org-wide (see `DECISIONS_LOG.md` §0.22). ⚠️ **Field-crew heads-up:** the crew was mostly tapping the now-deleted numeric/English codes (e.g. "Construction (General)", "Maintenance- Work Orders", "Turnover…", "Garbage cleanup") — they must now tap the **bilingual survivors** (Construction / Obra, Maint / Manten, Turnover / Vacante, Bulky / Voluminoso, etc.) instead.
 - Importer fix shipped + merged to `main` (supply-run hours resolve to the building via the cost code).
 - Cost-code names standardized to short bilingual `EN / ES` (e.g. `31 Park - Materials / Materiales`, `Maint / Manten`).
 - **All 26 Westend building projects created** in Workyard (S0042–S0067).
@@ -63,11 +64,8 @@ Rename project **`S0049- West End Portfolio` → `S0049 - 242-244 S Whitney`**.
 
 ---
 
-## ⏳ TASK 3 — Delete 3 junk/duplicate cost codes  *(Workyard UI — low priority)*
-Delete these (each is a 0–1-use duplicate of a code that's still in use, so nothing breaks):
-- `3` — Turnovers
-- `5` — Bulky Waste Cleanup
-- `8` — Vehchles and Equipment *(typo)*
+## ✅ TASK 3 — Delete junk/duplicate cost codes  *(DONE — superseded 2026-06-23)*
+Superseded by the org-wide cost-code consolidation on **2026-06-23**: **all 15 legacy duplicates** were deleted (not just the 3 listed here) — numeric `1 2 3 4 5 6 8 9`, zero-padded `01 02 03 05 001`, and the two empty-code ones ("Garbage cleanup (Bulkywaste)", "Construction (Waste and debris dumping)"). Every building project now sits at the clean **12 bilingual activity codes + its own Materials code** standard. See `DECISIONS_LOG.md` §0.22.
 
 ---
 

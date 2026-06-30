@@ -26,7 +26,7 @@ This labor is a **hidden cost of not having better document systems / process / 
 1. **A cleaner cost code than `OFFICE`.** `OFFICE`/Oficina currently conflates tenant document-chasing with any genuine office/admin time. Options: rename/split into a dedicated **"Tenant Document Coordination"** code (keeping true admin separate), or sub-tag. Until then the signal is approximate.
 2. **Cost-code persistence at import** — the shared prerequisite (cost code is dropped today). Same blocker as invoices + dumpster.
 
-On the **invoice**, this activity already displays as **"Tenant Coordination"** (the `OFFICE` code mapped to a customer-appropriate label) — distinct from this internal cost report.
+On the **invoice**, office-coded labor displays as **"Office & Administrative Support"** (renamed 2026-06-20 from the never-shipped "Tenant Coordination"; the code had been emitting plain "Office") — distinct from this internal cost report.
 
 ---
 

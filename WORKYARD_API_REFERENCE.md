@@ -307,8 +307,12 @@ List all work sites / geofences.
 
 ### Cost Codes
 
-#### `POST /orgs/{org_id}/cost_codes`
-Create a cost code.
+#### `POST /orgs/{org_id}/cost_codes` — ⚠️ DOES NOT EXIST (404)
+**This route is not implemented by Workyard.** Verified 2026-06-23: this and every other path
+variant (`/cost_codes`, `/cost-codes`, `/cost_code`, project-nested) return `404 ResourceNotFound`.
+Cost codes can only be **created in the Workyard UI**. The API supports read (`GET`), rename
+(`PUT /cost_codes/{id}`), and delete (`DELETE /cost_codes/{id}`) of cost codes — but not create.
+The request/response shape below is left for reference only; it was never a working endpoint.
 
 **Request body:**
 ```json

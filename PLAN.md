@@ -93,7 +93,7 @@ Capabilities built that were never in the feature list above:
 - **Unallocated-hours holds + Twilio SMS** (`unallocatedHolds.ts`, `twilio-api.ts`, `api/payroll/holds`, migrations `20260617_03/04`) — done; needs cron + revised copy.
 - **OD-2 cost-code→building importer fix** — done (main, 2026-06-19).
 - **Bilingual cost-code normalization** + `activityOf()` EN/ES resolver — done (53 codes renamed).
-- **Westend bulk-onboarding tooling** (`scripts/wy-onboard-buildings.mjs`) — 26 projects API-created; cost codes manual (see `MANUAL_TASKS_HANDOFF.md`).
+- **Westend bulk-onboarding tooling** (`scripts/wy-onboard-buildings.mjs`) — 26 projects API-created; cost codes pending (API-creatable via `POST /orgs/{org_id}/cost_codes`, or UI — see `MANUAL_TASKS_HANDOFF.md`).
 - **Remote-worker self-service portal** (`/portal?token=`) + **remote payroll run with Monitask cross-check** — done (Monitask live path pending vendor grant; mock works).
 - **Natural-language command bar / agent** (`/payroll/console`, `CommandBar`) over the audited operation layer — done.
 - **RLS / authz hardening** (PRP-01/03 + superadmin fix) — done, applied live.
@@ -113,8 +113,10 @@ This is the body of evidence for the equity/progress story: the plan was deliver
 4. **Sequential approval-stage enforcement** (`payroll_advance_status`) (G4). **P1.**
 5. Persist portfolio-wizard LLC groupings (G4). **P2.**
 6. Unallocated-SMS: daily cron + revised "fix it in Workyard" copy (`UNALLOCATED_HOURS_NOTIFICATION_PRD.md`). **P2.**
-7. Westend: finish the 26 manual cost codes + 3 junk-code deletes (`MANUAL_TASKS_HANDOFF.md`). **P2 (ops).**
+7. Westend: finish the 26 cost codes (API-scriptable via `POST /orgs/{org_id}/cost_codes`) + 3 junk-code deletes (`MANUAL_TASKS_HANDOFF.md`). **P2 (ops).**
 8. Workyard-miles import into the existing mileage pipeline. **P3.**
+9. **New Project onboarding wizard — go-live** (`audit/prps/06_PRP_New_Project_Wizard.md`). Safe slice built on `feat/new-project-wizard` (staged migrations `20260623_01–03`, dry-run provisioning, `/payroll/admin/onboard`, LLC→Workyard-customer map). To finish: decide the geofence + AppFolio-identity gates, apply the migrations, seed the customer map, and flip the provisioning executor to live. **P2.**
+10. **Travel-premium pay/billing wiring** (`audit/prps/07_PRP_Travel_Premium_Engine.md`). The premium is configured but `calculatePayroll` never reads it — setting one pays/bills nothing today. Wire it in (pay the employee, bill the property) with a golden case; sequence after #1 so it also reaches ADP export + reconciliation. **P2 (after #1).**
 
 ---
 

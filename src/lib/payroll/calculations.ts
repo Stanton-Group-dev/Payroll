@@ -10,6 +10,7 @@ import type {
 } from '@/lib/supabase/types'
 import { PAYROLL_TAX_RATE, WORKERS_COMP_RATE, PHONE_REIMBURSEMENT_AMOUNT, DEFAULT_MILEAGE_RATE } from '@/lib/payroll/config'
 import { compareLlcOrder } from '@/lib/payroll/llcOrder'
+import { parseLocalDate } from '@/lib/dates'
 
 /**
  * Given an employee's rate history and a week start date, return the rate
@@ -116,12 +117,12 @@ export function getMgmtFeeRate(
   /** ISO date string to use as the effective-date ceiling. Defaults to today when omitted. */
   asOf?: string
 ): number {
-  const ceiling = new Date(asOf ?? new Date().toISOString().slice(0, 10))
+  const ceiling = parseLocalDate(asOf ?? new Date().toISOString().slice(0, 10))!
   const effectiveConfigs = configs.filter(
-    c => new Date(c.effective_date) <= ceiling
+    c => parseLocalDate(c.effective_date)! <= ceiling
   )
   effectiveConfigs.sort((a, b) =>
-    new Date(b.effective_date).getTime() - new Date(a.effective_date).getTime()
+    parseLocalDate(b.effective_date)!.getTime() - parseLocalDate(a.effective_date)!.getTime()
   )
   // Portfolio-specific override wins
   const specific = effectiveConfigs.find(c => c.portfolio_id === portfolioId)

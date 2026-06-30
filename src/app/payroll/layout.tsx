@@ -169,9 +169,15 @@ function NavSection({
 export default function PayrollLayout({ children }: { children: React.ReactNode }) {
   return (
     <SelectedWeekProvider>
-      {/* print:* — drop the flex shell to plain block flow and stop the scroll
-          clip so multi-page statements/invoices paginate instead of cutting off. */}
-      <div className="flex min-h-screen bg-[var(--paper)] print:block print:min-h-0">
+      {/* Fixed-height app shell: the sidebar and main pane each fill the viewport
+          and scroll their own content. Without h-screen + overflow-hidden the
+          shell grows to the (often taller-than-viewport) sidebar, which drags the
+          page past 100vh and leaves a dead scroll zone below it. For print we drop
+          the flex shell to plain block flow (print:block) and restore natural,
+          un-clipped height/overflow (print:h-auto print:overflow-visible) so
+          multi-page statements/invoices paginate for server-side PDF rendering
+          instead of cutting off. */}
+      <div className="flex h-screen overflow-hidden bg-[var(--paper)] print:block print:h-auto print:overflow-visible">
         <Sidebar />
         <main className="flex-1 overflow-auto print:overflow-visible">{children}</main>
       </div>
