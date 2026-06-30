@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 /**
  * ONE-MOVE building onboarding for the Workyard side (DECISIONS_LOG 0.11/0.15).
- * Given a building (S-code + name), ensure its Workyard PROJECT exists (create via
- * POST /projects, or rename if mis-named), then print the manual COST-CODE step
- * (Workyard's API can't create cost codes — 404). The import fix then resolves
- * supply-run hours to the building automatically.
+ * Given a building (S-code + name): (1) ensure its Workyard PROJECT exists (create via
+ * POST /projects, or rename if mis-named); (2) attach the CANONICAL 12 standard activity
+ * codes to that project (the standard set every building carries — decision 2026-06-23).
+ * The one remaining manual step is the per-building "Materials" code: there is NO cost-code
+ * create API (POST …/cost_codes 404s), so it's made in the UI / CSV bulk import, then attached.
+ * The import fix then resolves supply-run hours to the building automatically.
  *
  * Usage:
  *   …node wy-onboard-buildings.mjs                 # DRY-RUN over the Westend batch
@@ -22,6 +24,10 @@ const APPLY = process.argv.includes('--apply')
 const ONLY = arg('--only')
 
 const WESTEND_CUSTOMER = 317292 // SREP Westend LLC
+// CANONICAL standard: every building project carries these 12 bilingual activity codes (by machine
+// code) + its own per-building "Materials" code. This script auto-attaches the 12; the Materials
+// code is still made in the UI/CSV (no cost-code create API). Decision 2026-06-23 (see DECISIONS_LOG).
+const CANONICAL = ['MAINT', 'CONST', 'TURN', 'WASTE', 'DUMP', 'OFFICE', 'PEST', 'SHOW', 'SNOW', 'VEH', 'LAWN', 'APPL']
 // Vendor "clusters" the per-building Material-Pickup cost code must attach to (name shown for the UI).
 const CLUSTERS = [
   'Park Hardware', 'Home Depot - West Hartford', 'Home Depot - Bloomfield', 'Home Depot-Glastonbury',
@@ -74,8 +80,17 @@ async function put(path, body) {
   const t = await r.text(); let j = null; try { j = JSON.parse(t) } catch {}
   return { ok: r.ok, status: r.status, j, t }
 }
+async function getAllCostCodes() {
+  const out = []; let page = 1, last = 1
+  do {
+    const r = await fetch(`${BASE}/orgs/${ORG}/cost_codes?limit=100&page=${page}`, { headers: H })
+    const j = await r.json(); out.push(...(j.data ?? [])); last = j.meta?.last_page ?? 1; page++
+  } while (page <= last)
+  return out
+}
+const sleep = (ms) => new Promise(r => setTimeout(r, ms))
 
-const projects = await getAllProjects()
+let projects = await getAllProjects()
 const bySCode = new Map()
 for (const p of projects) { const m = String(p.name ?? '').match(/^(S\d+)/i); if (m) bySCode.set(m[1].toUpperCase(), p) }
 
@@ -101,10 +116,38 @@ for (const [scode, building] of targets) {
     action = res.ok ? `RENAMED -> "${wantName}"` : `FAIL ${res.status} ${res.t.slice(0, 140)}`
   }
   console.log(`  ${scode.padEnd(7)} ${action}`)
-  checklist.push({ scode, codeName: `${building} - Materials / Materiales`, project: wantName })
+  checklist.push({ scode, codeName: `${building} - Materials / Materiales`, project: wantName, projectId })
 }
 
-console.log(`\n=== MANUAL COST-CODE CHECKLIST (Workyard API can't create cost codes — UI) ===`)
-console.log(`For each, create a cost code:  code = <S-code>,  name = "<building> - Materials / Materiales",`)
-console.log(`attach to its own project + these ${CLUSTERS.length} vendor clusters: ${CLUSTERS.join('; ')}\n`)
+// --- Attach the canonical 12 activity codes to every target building project (the standard set) ---
+// Read-modify-write per code so existing attachments are preserved; new project just gets added.
+console.log(`\n=== CANONICAL CODES — attaching the standard 12 to each building project ===`)
+const costCodes = await getAllCostCodes()
+const canon = CANONICAL.map(code => costCodes.find(c => String(c.code ?? '').trim().toUpperCase() === code)).filter(Boolean)
+if (canon.length !== CANONICAL.length) {
+  const found = new Set(canon.map(c => String(c.code).trim().toUpperCase()))
+  console.log(`  ⚠ only found ${canon.length}/${CANONICAL.length} canonical codes — missing: ${CANONICAL.filter(c => !found.has(c)).join(', ')}`)
+}
+const targetProjectIds = checklist.map(c => c.projectId).filter(Boolean)
+if (!APPLY) {
+  console.log(`  DRY-RUN — would attach [${canon.map(c => c.code).join(' ')}] to ${targetProjectIds.length} project(s).`)
+} else if (!targetProjectIds.length) {
+  console.log(`  (no project ids resolved — nothing to attach)`)
+} else {
+  projects = await getAllProjects() // refresh so newly-created projects are visible for read-modify-write
+  for (const c of canon) {
+    const cur = new Set(projects.filter(p => (p.cost_code_ids ?? []).includes(c.id)).map(p => p.id))
+    const toAdd = targetProjectIds.filter(id => !cur.has(id))
+    if (!toAdd.length) { console.log(`  [${c.code}] already attached (no-op)`); continue }
+    const res = await put(`/orgs/${ORG}/cost_codes/${c.id}`, { name: c.name, code: c.code, include_all_projects: false, project_ids: [...cur, ...toAdd] })
+    console.log(`  [${c.code}] ${res.ok ? `+${toAdd.length} → ${cur.size + toAdd.length} projects` : `FAIL ${res.status} ${res.t.slice(0, 120)}`}`)
+    await sleep(300)
+  }
+}
+
+console.log(`\n=== MATERIALS COST CODE — still manual (no cost-code create API) ===`)
+console.log(`For each building, create ONE cost code in the Workyard UI (or CSV bulk import):`)
+console.log(`  code = <S-code>,  name = "<building> - Materials / Materiales"`)
+console.log(`then attach it to its own project + the shared vendor/Office clusters (see wy-attach-westend-costcodes.mjs).`)
+console.log(`Clusters for reference: ${CLUSTERS.join('; ')}\n`)
 for (const c of checklist) console.log(`  code ${c.scode}   name "${c.codeName}"   (+ project "${c.project}")`)

@@ -34,7 +34,7 @@ Workyard's objects, top to bottom, with the Stanton meaning:
 - **GPS time tracking** — clock in/out on the mobile app, GPS-stamped, geofence-aware. The core feed.
 - **Cost allocation** — worker tags each segment to a project (building) + cost code (activity / building-for-materials). This is what makes per-property billing possible.
 - **Projects** — the 26 Westend buildings + all other S-code buildings + vendor projects. (Created/maintained via API where possible — see matrix.)
-- **Cost codes** — activity set (bilingual `EN / ES`) + per-building Material-Pickup codes. (Renamed via API; created only in the UI.)
+- **Cost codes** — activity set (bilingual `EN / ES`) + per-building Material-Pickup codes. (Renamed via API; created only in the UI.) **Canonical standard (2026-06-23):** every building project carries the **12 bilingual activity codes** (`MAINT CONST TURN WASTE DUMP OFFICE PEST SHOW SNOW VEH LAWN APPL`) **+ its own per-building "Materials" code**; the legacy numeric/zero-padded duplicate codes were deleted org-wide on 2026-06-23 (`DECISIONS_LOG.md` §0.22). New buildings get the 12 auto-attached via `scripts/wy-onboard-buildings.mjs`.
 - **Geofences** — per-building/street + vendor "clusters"; auto-suggest the project at the jobsite.
 - **Employees** — roster + pay rate + mobile, synced into `payroll_employees`.
 - **Manager approval** — review/correct/approve time cards before we pull them.
@@ -75,21 +75,21 @@ This is the hard-won part — what the API will and won't let us do. **Read this
 | List geofences | `GET /geofences` | ✅ | |
 | Create geofence | `POST /geofences` | ⚠️ | Exists but needs an `ext_address_id` (geocoded) — effectively UI-only for net-new. |
 | List cost codes | `GET /cost_codes` | ✅ | |
-| **Create cost code** | `POST /cost_codes` | ❌ | **404 — no create endpoint. Cost codes can only be made in the UI.** This is the #1 onboarding constraint. |
+| **Create cost code** | `POST /orgs/{org_id}/cost_codes` | ❌ (API) / ✅ (UI CSV) | **No API create route — 404** (verified 2026-06-23: org-scoped, un-scoped, hyphen, singular, project-nested POSTs all `404 ResourceNotFound`; control `POST /projects` 400-validates). **But the UI has a fast bulk path: Project Hub → Cost Codes → "+ Cost Code" → Import Cost Codes → Spreadsheet (CSV).** Template headers are **`Cost_Code_Name,Cost_Code_Number`** (name first; the help-doc "Code,Name" is wrong). 26 Westend codes created this way 2026-06-23 (`scripts/westend-material-costcodes.csv`). |
 | Rename cost code | `PUT /cost_codes/{id}` | ✅ | Used for the bilingual rename (53 codes). Body: `{name, code, include_all_projects:false}`. (`PATCH` 404s.) |
 | Archive cost code | `PUT … {is_archived:true}` | ❌ | Accepted (200) but **silently ignored** — no archive via API. |
 | Delete cost code | `DELETE /cost_codes/{id}` | ✅* | Works, but irreversible; *our agent harness gates it* (needs an explicit permission rule). |
-| Attach cost code ↔ project | project-side (`cost_code_ids`) | ⚠️ | Associations live on the project; since `PUT /projects` 404s, attachment is effectively UI. |
+| **Attach cost code ↔ project** | `PUT /orgs/{org_id}/cost_codes/{id}` w/ `project_ids` | ✅ | **Works — corrected 2026-06-23.** The cost-code PUT accepts a `project_ids` array and sets the associations (body: `{name, code, include_all_projects:false, project_ids:[…]}`). Verified by attaching all 26 Westend codes to 8 projects each (`scripts/wy-attach-westend-costcodes.mjs`). The old "effectively UI (since `PUT /projects` 404s)" was wrong — you set attachments from the **cost-code** side, not the project side. |
 | List employees | `GET /employees.v2` | ✅ | `include=employee_groups`; `mobile`, `pay_rate`, `status` |
 | Org settings | `GET /orgs/{id}` | ✅ | timezone, location-tracking, breaks-paid flags |
 
-**Plain-English takeaway:** you can **read everything** and **create projects**, but you **cannot create cost codes, update projects, or write time cards** via API. Those three are UI-only. That's why onboarding a building is "API creates the project, a human adds the cost code."
+**Plain-English takeaway:** you can **read everything**, **create projects**, **rename/delete cost codes**, and **attach cost codes to projects** (`PUT …/cost_codes/{id}` with `project_ids`); you **cannot create cost codes or update projects or write time cards** via API. So onboarding a building is **mostly scripted** — the API creates the project and (once the code exists) attaches it; only the cost-code *creation itself* is UI (and the UI's **CSV bulk import** makes even that a one-shot for many buildings).
 
 ---
 
 ## 5. Hard limits & gotchas (don't relearn these)
 
-- **No cost-code creation API** (404) → per-building Material-Pickup codes are manual UI data entry. No automation path.
+- **No cost-code creation API** (`POST …/cost_codes` returns 404 on every path variant — verified 2026-06-23) → per-building Material-Pickup codes must be created in the **Workyard UI**. You *can* rename and delete existing codes via API, just not create. (An earlier doc claimed create worked; it never did — the route doesn't exist.)
 - **No time-card write API** → "approve/close out in Workyard from our app" isn't possible; approval stays in Workyard or moves fully in-app (see `IN_APP_TIME_APPROVAL_PRD.md`).
 - **No project update API** (`PUT` 404) → renames (e.g. `S0049- West End Portfolio` → `… 242-244 S Whitney`) are UI-only and cosmetic (the S-code prefix is what resolves).
 - **No per-worker language.** Employees have no locale field; a cost code has one `name`; visibility is by project attachment, not language. So a mixed EN+ES crew shares **one bilingual** code set; true per-language dropdowns would require our own app.
@@ -102,8 +102,8 @@ This is the hard-won part — what the API will and won't let us do. **Read this
 ## 6. Onboarding a new building (the repeatable move)
 
 1. **DB:** ensure a `properties` row with `code = <S-code>` (normal property onboarding).
-2. **Project (API):** `node scripts/wy-onboard-buildings.mjs --scode <S> --name "<addr>" --customer <LLC_id> --geofence <id> --apply` → creates the Workyard project reusing an existing geofence.
-3. **Cost code (UI — manual):** create `<addr> - Materials / Materiales`, code `<S>`, attached to its project + the 10 vendor clusters.
+2. **Project + 12 activity codes (API):** `node scripts/wy-onboard-buildings.mjs --scode <S> --name "<addr>" --customer <LLC_id> --geofence <id> --apply` → creates the Workyard project reusing an existing geofence **and auto-attaches the 12 canonical bilingual activity codes** (`MAINT CONST TURN WASTE DUMP OFFICE PEST SHOW SNOW VEH LAWN APPL`).
+3. **Materials cost code (UI only — no API):** in Workyard, create `<addr> - Materials / Materiales`, code `<S>`, attached to its project + the shared vendor/Office clusters (**7** per the live convention — Office + Park Hardware, Home Depot-Glastonbury, Lowes-Bloomfield, Express Kitchens, New England Gypsum, All Waste — not the 10 the old checklist listed). (Only the per-building Materials code is manual now; the 12 activity codes ship via step 2.)
 4. Done — supply runs and on-site time now resolve to the building.
 
 See `MANUAL_TASKS_HANDOFF.md` for the current Westend to-do and `WESTEND_WORKYARD_SETUP.md` for the full building list.

@@ -87,7 +87,7 @@ ANTHROPIC_API_KEY=<key>   # only needed for the NL command bar
 4. **Sequential approval-stage enforcement** (`payroll_advance_status`) — stages can currently be set without prerequisite checks. **P1.**
 5. Persist the portfolio-wizard LLC groupings. **P2.**
 6. Unallocated-SMS: daily cron + revised "fix it in Workyard" copy. **P2.**
-7. Westend: the 26 manual cost codes + 3 junk deletes (`MANUAL_TASKS_HANDOFF.md`). **P2 (ops).**
+7. Westend: the 26 cost codes (API-scriptable via `POST /orgs/{org_id}/cost_codes`) + 3 junk deletes (`MANUAL_TASKS_HANDOFF.md`). **P2 (ops).**
 8. Workyard-miles import into the existing mileage pipeline. **P3.**
 
 ---

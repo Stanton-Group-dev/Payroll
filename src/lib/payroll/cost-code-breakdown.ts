@@ -28,7 +28,7 @@ export function activityOf(name: string): string {
   if (n.includes('aparato') || n.includes('appliance')) return 'Appliance Repair'
   if (n.includes('muestra') || n.includes('showing')) return 'Showings'
   if (n.includes('veh')) return 'Vehicles & Equipment'
-  if (n.includes('oficina') || n.includes('office')) return 'Office'
+  if (n.includes('oficina') || n.includes('office')) return 'Office & Administrative Support'
   return name
 }
 
