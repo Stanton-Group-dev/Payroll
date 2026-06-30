@@ -39,6 +39,7 @@ import {
   ClipboardList,
   MessageSquare,
   EyeOff,
+  CalendarCheck,
   type LucideIcon,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/payroll/useAuth'
@@ -53,6 +54,7 @@ type Item = { href: string; label: string; icon: LucideIcon; exact?: boolean }
 // "Run the week" — the recurring weekly flow, in workflow order.
 const weekInputs: Item[] = [
   { href: '/payroll', label: 'Week Dashboard', icon: LayoutDashboard, exact: true },
+  { href: '/payroll/daily', label: 'Daily Catch-up', icon: CalendarCheck },
   { href: '/payroll/import', label: 'Workyard Import', icon: Upload },
 ]
 const weekAllocate: Item[] = [

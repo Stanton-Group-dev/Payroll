@@ -312,48 +312,60 @@ function unixToDate(unix: number): string {
   }).format(new Date(unix * 1000))
 }
 
+// A building can ride in the COST CODE rather than the project. On vendor/supply runs
+// (Home Depot, "Office Park Hardware Cluster", …) the Workyard project is the vendor and
+// the employee taps a per-building "Material Pickup" cost code whose `code` IS the S-code
+// (e.g. "S0020"). Recover that S-code so the hours bill to the building instead of landing
+// unallocated. Generic over any S-code → new acquisitions need no code change, just a
+// property row + a per-building cost code in Workyard. See DECISIONS_LOG.md §0.2.
+function sCodeFromCost(jc: WYJobCode | undefined): string | null {
+  const m = (jc?.code ?? '').match(/^\s*(S\d+)/i) ?? (jc?.name ?? '').match(/\b(S\d+)\b/i)
+  return m ? m[1].toUpperCase() : null
+}
+
 /**
- * Fetch all approved Workyard time cards for a given week and convert them to
- * WorkyardRow[] — the same interface produced by parseWorkyardCSV().
- *
- * A single time card with multiple cost allocations is split into one row per
- * allocation, with hours distributed proportionally by duration_secs.
+ * A raw Workyard time card plus extra context hints (geofence name, cost-code name)
+ * that the daily allocation view surfaces to the manager so they can identify the
+ * building from available signals when the project is missing.
  */
-export async function fetchWorkyardTimecards(
-  weekStart: string,
-  approvedOnly = true
-): Promise<{ rows: WorkyardRow[]; stats: { total: number; allocations: number } }> {
-  // Dev/test path: return deterministic dummy data instead of calling Workyard.
-  if (isWorkyardMockEnabled()) {
-    return generateMockTimecards(weekStart)
-  }
+export interface DailyTimecardRow extends WorkyardRow {
+  /** Geofence name on the first cost allocation (if any) — the GPS job-site hint. */
+  geofenceName: string
+  /** Cost-code name on the first cost allocation (if any) — often carries S-code or site name. */
+  firstCostCodeName: string
+}
 
-  const startUnix = orgMidnightUnix(weekStart)
-  // Advance 7 days from noon UTC to stay in the right calendar day, then find midnight
-  const endProbe = new Date(`${weekStart}T12:00:00Z`)
-  endProbe.setUTCDate(endProbe.getUTCDate() + 7)
-  const endDateStr = endProbe.toISOString().slice(0, 10)
-  const endUnix = orgMidnightUnix(endDateStr)
-
-  const [cards, projectMap] = await Promise.all([
-    fetchApprovedTimeCards(startUnix, endUnix, approvedOnly),
-    fetchProjectMap(),
-  ])
-
-  const rows: WorkyardRow[] = []
-
-  // A building can ride in the COST CODE rather than the project. On vendor/supply runs
-  // (Home Depot, "Office Park Hardware Cluster", …) the Workyard project is the vendor and
-  // the employee taps a per-building "Material Pickup" cost code whose `code` IS the S-code
-  // (e.g. "S0020"). Recover that S-code so the hours bill to the building instead of landing
-  // unallocated. Generic over any S-code → new acquisitions need no code change, just a
-  // property row + a per-building cost code in Workyard. See DECISIONS_LOG.md §0.2.
-  const sCodeFromCost = (jc: WYJobCode | undefined): string | null => {
-    const m = (jc?.code ?? '').match(/^\s*(S\d+)/i) ?? (jc?.name ?? '').match(/\b(S\d+)\b/i)
-    return m ? m[1].toUpperCase() : null
-  }
+/**
+ * Convert a list of raw WYTimeCard objects (already fetched) into WorkyardRow[] /
+ * DailyTimecardRow[], sharing the same card→row mapping logic used by both the weekly
+ * pull and the daily catch-up view.
+ *
+ * @param cards      Raw WYTimeCard objects from the API (or mock).
+ * @param projectMap Project-id → { sCode, customerName } resolved from the org's project list.
+ * @param daily      When true, skip cards that are still `working` (no end time yet) and
+ *                   return DailyTimecardRow (with extra hint fields) instead of WorkyardRow.
+ */
+function mapCardsToRows(
+  cards: WYTimeCard[],
+  projectMap: Map<number, { sCode: string; customerName: string }>,
+  daily: false
+): WorkyardRow[]
+function mapCardsToRows(
+  cards: WYTimeCard[],
+  projectMap: Map<number, { sCode: string; customerName: string }>,
+  daily: true
+): DailyTimecardRow[]
+function mapCardsToRows(
+  cards: WYTimeCard[],
+  projectMap: Map<number, { sCode: string; customerName: string }>,
+  daily: boolean
+): WorkyardRow[] | DailyTimecardRow[] {
+  const rows: DailyTimecardRow[] = []
 
   for (const card of cards) {
+    // Skip still-clocked-in cards (no end time) in daily mode.
+    if (daily && card.status === 'working') continue
+
     const workyardId = String(card.worker?.employee_id ?? card.employee_id)
     const employeeName = card.worker?.display_name ?? `Employee ${card.employee_id}`
     const entryDate = unixToDate(card.start_dt_unix)
@@ -371,6 +383,12 @@ export async function fetchWorkyardTimecards(
       a => a.org_project_id !== null || sCodeFromCost(a.job_code) !== null,
     ) ?? []
 
+    // Hint fields for the daily view (populated even for allocated cards so the UI
+    // can show the site context regardless of allocation status).
+    const firstAlloc = card.cost_allocations?.[0]
+    const geofenceName = firstAlloc?.geofence?.name ?? ''
+    const firstCostCodeName = firstAlloc?.job_code?.name ?? ''
+
     if (allocations.length === 0) {
       rows.push({
         workyardId,
@@ -384,6 +402,8 @@ export async function fetchWorkyardTimecards(
         timecardId,
         costCode: '',
         costCodeName: '',
+        geofenceName,
+        firstCostCodeName,
       })
       continue
     }
@@ -417,13 +437,137 @@ export async function fetchWorkyardTimecards(
         // the real code. costCodeName captures the human label for both.
         costCode: alloc.job_code?.name ?? '',
         costCodeName: alloc.job_code?.name ?? '',
+        geofenceName: i === 0 ? geofenceName : '',
+        firstCostCodeName: i === 0 ? firstCostCodeName : '',
       })
     }
   }
 
+  if (daily) return rows
+  return rows as WorkyardRow[]
+}
+
+/**
+ * Fetch all approved Workyard time cards for a given week and convert them to
+ * WorkyardRow[] — the same interface produced by parseWorkyardCSV().
+ *
+ * A single time card with multiple cost allocations is split into one row per
+ * allocation, with hours distributed proportionally by duration_secs.
+ */
+export async function fetchWorkyardTimecards(
+  weekStart: string,
+  approvedOnly = true
+): Promise<{ rows: WorkyardRow[]; stats: { total: number; allocations: number } }> {
+  // Dev/test path: return deterministic dummy data instead of calling Workyard.
+  if (isWorkyardMockEnabled()) {
+    return generateMockTimecards(weekStart)
+  }
+
+  const startUnix = orgMidnightUnix(weekStart)
+  // Advance 7 days from noon UTC to stay in the right calendar day, then find midnight
+  const endProbe = new Date(`${weekStart}T12:00:00Z`)
+  endProbe.setUTCDate(endProbe.getUTCDate() + 7)
+  const endDateStr = endProbe.toISOString().slice(0, 10)
+  const endUnix = orgMidnightUnix(endDateStr)
+
+  const [cards, projectMap] = await Promise.all([
+    fetchApprovedTimeCards(startUnix, endUnix, approvedOnly),
+    fetchProjectMap(),
+  ])
+
+  const rows = mapCardsToRows(cards, projectMap, false)
+
   return {
     rows,
     stats: { total: cards.length, allocations: rows.length },
+  }
+}
+
+/**
+ * Compute the date window for the daily catch-up view.
+ *
+ * Returns [startDateStr, endDateStr] (both YYYY-MM-DD, org timezone) such that:
+ * - On Tuesday–Sunday: startDate = endDate = yesterday.
+ * - On Monday: startDate = Saturday, endDate = Sunday (covers the whole weekend).
+ *
+ * "Yesterday" is derived from `nowIso` (a YYYY-MM-DD string in org time), which
+ * callers supply so the function is pure and testable without a real clock.
+ */
+export function dailyCatchupDateRange(nowIso: string): { start: string; end: string } {
+  const d = new Date(`${nowIso}T12:00:00Z`)
+  // getUTCDay() on a noon-UTC probe gives the org-timezone weekday reliably.
+  const dow = d.getUTCDay() // 0=Sun,1=Mon,…,6=Sat
+  if (dow === 1) {
+    // Monday: cover Sat + Sun
+    const sat = new Date(d)
+    sat.setUTCDate(sat.getUTCDate() - 2)
+    const sun = new Date(d)
+    sun.setUTCDate(sun.getUTCDate() - 1)
+    return {
+      start: sat.toISOString().slice(0, 10),
+      end: sun.toISOString().slice(0, 10),
+    }
+  }
+  // Any other day: just yesterday.
+  const yesterday = new Date(d)
+  yesterday.setUTCDate(yesterday.getUTCDate() - 1)
+  const y = yesterday.toISOString().slice(0, 10)
+  return { start: y, end: y }
+}
+
+/**
+ * Fetch Workyard time cards for one calendar day (or a Sat+Sun pair on Mondays),
+ * returning ALL non-working cards — approved and unapproved alike, so the manager
+ * can catch unallocated hours before the weekly import runs.
+ *
+ * Cards still clocked in (status = 'working') are excluded.
+ *
+ * Returns DailyTimecardRow[] which extends WorkyardRow with extra hint fields
+ * (geofenceName, firstCostCodeName) the daily view surfaces to the manager.
+ */
+export async function fetchDailyTimecards(
+  dateStr: string
+): Promise<{ rows: DailyTimecardRow[]; stats: { total: number; unallocated: number } }> {
+  if (isWorkyardMockEnabled()) {
+    // Re-use the weekly mock and filter to the requested date, tagging it as daily.
+    const { rows: weekRows } = generateMockTimecards(
+      // generateMockTimecards expects a Sunday week_start; use a Sunday 6 days before
+      // the requested date so the date always falls within the generated week.
+      (() => {
+        const d = new Date(`${dateStr}T12:00:00Z`)
+        d.setUTCDate(d.getUTCDate() - d.getUTCDay()) // back to Sunday
+        return d.toISOString().slice(0, 10)
+      })()
+    )
+    const daily: DailyTimecardRow[] = weekRows
+      .filter(r => r.entryDate === dateStr)
+      .map(r => ({ ...r, geofenceName: '', firstCostCodeName: r.costCodeName }))
+    return {
+      rows: daily,
+      stats: { total: daily.length, unallocated: daily.filter(r => !r.projectName).length },
+    }
+  }
+
+  // Compute the inclusive day window: midnight to midnight org time.
+  const startUnix = orgMidnightUnix(dateStr)
+  const nextProbe = new Date(`${dateStr}T12:00:00Z`)
+  nextProbe.setUTCDate(nextProbe.getUTCDate() + 1)
+  const endUnix = orgMidnightUnix(nextProbe.toISOString().slice(0, 10))
+
+  // approvedOnly = false: catch ALL submitted/approved/processed (not working).
+  const [cards, projectMap] = await Promise.all([
+    fetchApprovedTimeCards(startUnix, endUnix, false),
+    fetchProjectMap(),
+  ])
+
+  const rows = mapCardsToRows(cards, projectMap, true)
+
+  return {
+    rows,
+    stats: {
+      total: rows.length,
+      unallocated: rows.filter(r => !r.projectName).length,
+    },
   }
 }
 
