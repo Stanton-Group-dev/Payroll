@@ -243,6 +243,55 @@ export default function ImportPage() {
       if (row.status === 'unmatched_employee') { errors++; continue }
 
       try {
+        // FR-4: If this card has no building resolved (propertyId is null and the row
+        // is not an overhead spread), look up any pre-saved allocation from the daily
+        // catch-up tool. If found, expand the card into one allocated row per saved leg,
+        // scaling hours proportionally if the card's total hours differ from what was
+        // saved. If no saved allocation exists, behave exactly as before.
+        const isUnallocatedCard = !row.propertyId && !row.overheadSpread && row.timecardId
+        if (isUnallocatedCard) {
+          const { data: dailyLegs } = await supabase
+            .from('payroll_daily_allocations')
+            .select('property_id, fraction')
+            .eq('workyard_timecardid', row.timecardId)
+          if (dailyLegs && dailyLegs.length > 0) {
+            const cardTotalHours = row.regularHours + row.otHours
+            let legImported = 0
+            let legFailed = 0
+            for (const leg of dailyLegs) {
+              const legHours = parseFloat((cardTotalHours * leg.fraction).toFixed(2))
+              const { error: legErr } = await supabase.from('payroll_time_entries').insert({
+                payroll_week_id: selectedWeekId,
+                employee_id: row.employeeId!,
+                property_id: leg.property_id,
+                entry_date: row.entryDate || format(new Date(), 'yyyy-MM-dd'),
+                regular_hours: legHours,
+                ot_hours: 0,
+                pto_hours: row.ptoHours,
+                miles: row.miles ?? 0,
+                source: importMode === 'api' ? 'workyard_api' : 'workyard',
+                workyard_timecardid: row.timecardId,
+                is_flagged: false,
+                flag_reason: null,
+                is_overhead_spread: false,
+                cost_code: row.costCode || null,
+                cost_code_name: row.costCodeName || null,
+              })
+              if (legErr) legFailed++
+              else legImported++
+            }
+            if (legFailed > 0) {
+              failures.push(
+                `${row.employeeName2 ?? row.employeeName} • ${row.entryDate} • daily-alloc split` +
+                ` • ${legFailed} leg(s) failed to insert`
+              )
+              failed += legFailed
+            }
+            imported += legImported
+            continue
+          }
+        }
+
         const { error: insertErr } = await supabase.from('payroll_time_entries').insert({
           payroll_week_id: selectedWeekId,
           employee_id: row.employeeId!,
