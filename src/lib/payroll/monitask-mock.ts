@@ -1,4 +1,5 @@
 import type { MonitaskActivityRow } from '@/lib/payroll/timesources/types'
+import { addLocalDays } from '@/lib/dates'
 
 /**
  * Dummy Monitask activity for the remote-run import path.
@@ -24,11 +25,9 @@ export function isMonitaskMockEnabled(): boolean {
   return v === '1' || v === 'true' || v === 'yes'
 }
 
-/** Add `days` to a YYYY-MM-DD string (UTC-safe), returning YYYY-MM-DD. */
+/** Add `days` to a YYYY-MM-DD string, returning YYYY-MM-DD. */
 function addDays(dateStr: string, days: number): string {
-  const d = new Date(`${dateStr}T00:00:00Z`)
-  d.setUTCDate(d.getUTCDate() + days)
-  return d.toISOString().slice(0, 10)
+  return addLocalDays(dateStr, days)
 }
 
 /**

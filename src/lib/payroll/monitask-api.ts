@@ -5,6 +5,7 @@ import {
 } from '@/lib/payroll/config'
 import { isMonitaskMockEnabled, generateMockActivity } from '@/lib/payroll/monitask-mock'
 import type { MonitaskActivityRow } from '@/lib/payroll/timesources/types'
+import { addLocalDays } from '@/lib/dates'
 
 /**
  * Monitask client — the remote-worker activity source (reference data for the
@@ -107,11 +108,9 @@ async function getAccessToken(): Promise<string> {
 /* Data fetch — the single endpoint-specific seam.                    */
 /* ------------------------------------------------------------------ */
 
-/** Add `days` to a YYYY-MM-DD string (UTC-safe), returning YYYY-MM-DD. */
+/** Add `days` to a YYYY-MM-DD string, returning YYYY-MM-DD. */
 function addDays(dateStr: string, days: number): string {
-  const d = new Date(`${dateStr}T00:00:00Z`)
-  d.setUTCDate(d.getUTCDate() + days)
-  return d.toISOString().slice(0, 10)
+  return addLocalDays(dateStr, days)
 }
 
 /** Raw shape we expect from the report endpoint. Adjust once the contract is known. */

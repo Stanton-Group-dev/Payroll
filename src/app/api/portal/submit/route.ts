@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createAdminClient } from '@/lib/supabase/admin'
 import { resolvePortalContext } from '@/lib/payroll/portal'
+import { addLocalDays } from '@/lib/dates'
 
 export const runtime = 'nodejs'
 
@@ -35,11 +36,8 @@ export async function POST(req: NextRequest) {
   // Validate + clamp the posted days to the run week.
   const weekDates = new Set<string>()
   {
-    const start = new Date(ctx.week.week_start + 'T00:00:00Z')
     for (let i = 0; i < 7; i++) {
-      const d = new Date(start)
-      d.setUTCDate(d.getUTCDate() + i)
-      weekDates.add(d.toISOString().slice(0, 10))
+      weekDates.add(addLocalDays(ctx.week.week_start, i))
     }
   }
   const rows = (body.days ?? [])

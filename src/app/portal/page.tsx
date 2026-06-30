@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState, useCallback } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { format } from 'date-fns'
+import { addLocalDays } from '@/lib/dates'
 
 interface SessionData {
   worker: { name: string }
@@ -11,9 +12,7 @@ interface SessionData {
 }
 
 function addDaysUTC(dateStr: string, days: number): string {
-  const d = new Date(dateStr + 'T00:00:00Z')
-  d.setUTCDate(d.getUTCDate() + days)
-  return d.toISOString().slice(0, 10)
+  return addLocalDays(dateStr, days)
 }
 
 function PortalInner() {
