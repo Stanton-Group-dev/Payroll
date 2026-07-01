@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { fetchAllRows } from '@/lib/supabase/fetchAll'
 import { otMultiplier } from '@/lib/payroll/calculations'
 
 export interface WeekHistoryData {
@@ -71,11 +72,15 @@ export function useEmployeePayHistory() {
     if (weekIds.length === 0) { setRows([]); setLoading(false); return }
 
     const [entRes, adjRes, empRes] = await Promise.all([
-      supabase.from('payroll_time_entries')
+      // An all-time span for a spread-heavy employee (one row per property × day)
+      // exceeds the 1,000-row select cap — drain in pages.
+      fetchAllRows((from, to) => supabase.from('payroll_time_entries')
         .select('payroll_week_id, regular_hours, ot_hours, pto_hours')
         .eq('employee_id', employeeId)
         .eq('is_flagged', false)
-        .in('payroll_week_id', weekIds),
+        .in('payroll_week_id', weekIds)
+        .order('id')
+        .range(from, to)),
       supabase.from('payroll_adjustments')
         .select('payroll_week_id, type, amount')
         .eq('employee_id', employeeId)

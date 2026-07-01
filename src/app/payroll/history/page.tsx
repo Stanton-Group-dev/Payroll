@@ -8,6 +8,7 @@ import { usePayrollEmployees } from '@/hooks/payroll/usePayrollEmployees'
 import { useEmployeePayHistory } from '@/hooks/payroll/usePayrollHistory'
 import { PageHeader, FormButton, FormField, FormInput, FormSelect, StatusBadge } from '@/components/form'
 import { createClient } from '@/lib/supabase/client'
+import { fetchAllRows } from '@/lib/supabase/fetchAll'
 import { formatCurrency } from '@/lib/payroll/calculations'
 import { format } from 'date-fns'
 
@@ -51,7 +52,12 @@ export default function HistoryPage() {
     const supabase = createClient()
     const [empRes, entRes, adjRes] = await Promise.all([
       supabase.from('payroll_employees').select('*'),
-      supabase.from('payroll_time_entries').select('*, property:properties(code, name)').eq('payroll_week_id', weekId),
+      // A week's entries exceed the 1,000-row select cap (spread legs) — drain in pages.
+      fetchAllRows((from, to) => supabase.from('payroll_time_entries')
+        .select('*, property:properties(code, name)')
+        .eq('payroll_week_id', weekId)
+        .order('id')
+        .range(from, to)),
       supabase.from('payroll_adjustments').select('*, employee:payroll_employees(name)').eq('payroll_week_id', weekId),
     ])
     const lines: string[] = []
@@ -94,9 +100,11 @@ export default function HistoryPage() {
     const supabase = createClient()
     const [empRes, entRes, adjRes, invRes, costRes] = await Promise.all([
       supabase.from('payroll_employees').select('*'),
-      supabase.from('payroll_time_entries')
+      fetchAllRows((from, to) => supabase.from('payroll_time_entries')
         .select('*, property:properties(code, name)')
-        .eq('payroll_week_id', weekId),
+        .eq('payroll_week_id', weekId)
+        .order('id')
+        .range(from, to)),
       supabase.from('payroll_adjustments')
         .select('*, employee:payroll_employees(name)')
         .eq('payroll_week_id', weekId),

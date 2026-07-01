@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { fetchAllRows } from '@/lib/supabase/fetchAll'
 
 export interface WorkyardReliabilityRow {
   employee_id: string
@@ -25,19 +26,23 @@ export function useWorkyardReliability(employeeId?: string) {
     setError(null)
     const supabase = createClient()
 
-    // Fetch all active time entries with employee info
-    let query = supabase
-      .from('payroll_time_entries')
-      .select(`
-        id, employee_id, source, property_id, payroll_week_id,
-        regular_hours, ot_hours,
-        employee:payroll_employees(id, name)
-      `)
-      .eq('is_active', true)
-
-    if (employeeId) query = query.eq('employee_id', employeeId)
-
-    const { data, error: err } = await query
+    // Fetch all active time entries with employee info. This spans every week, so
+    // it blew past the 1,000-row select cap long ago — drain in pages or the
+    // reliability stats are computed on an arbitrary first page.
+    const { data, error: err } = await fetchAllRows((from, to) => {
+      let query = supabase
+        .from('payroll_time_entries')
+        .select(`
+          id, employee_id, source, property_id, payroll_week_id,
+          regular_hours, ot_hours,
+          employee:payroll_employees(id, name)
+        `)
+        .eq('is_active', true)
+        .order('id')
+        .range(from, to)
+      if (employeeId) query = query.eq('employee_id', employeeId)
+      return query
+    })
     if (err) { setError(err.message); setLoading(false); return }
 
     const entries = data ?? []

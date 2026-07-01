@@ -10,6 +10,7 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 import type { PayrollEmployeeHold, PayrollNotification } from '@/lib/supabase/types'
 import { sendSms, isTwilioLive } from '@/lib/payroll/twilio-api'
 import { assertWeekWritable } from '@/lib/payroll/weekLock'
+import { fetchAllRows } from '@/lib/supabase/fetchAll'
 
 /** Below this many unallocated hours we don't hold or notify (≈15 min). */
 export const UNALLOCATED_HOLD_THRESHOLD_HOURS = 0.25
@@ -45,7 +46,9 @@ export async function detectUnallocatedEmployees(
   weekId: string,
   threshold: number = UNALLOCATED_HOLD_THRESHOLD_HOURS,
 ): Promise<UnallocatedEmployee[]> {
-  const { data: rows, error } = await admin
+  // A freshly imported week can carry >1,000 unallocated rows before anyone
+  // allocates — drain past the select cap so no employee's hours are undercounted.
+  const { data: rows, error } = await fetchAllRows((from, to) => admin
     .from('payroll_time_entries')
     .select('employee_id, regular_hours, ot_hours')
     .eq('payroll_week_id', weekId)
@@ -54,6 +57,8 @@ export async function detectUnallocatedEmployees(
     // Overhead-spread entries (e.g. "Office") have no property by design — they're
     // allocated by unit-spread, not unresolved — so they never count as unallocated.
     .eq('is_overhead_spread', false)
+    .order('id')
+    .range(from, to))
   if (error) throw new Error(error.message)
 
   const hoursByEmp = new Map<string, number>()

@@ -17,6 +17,7 @@ import {
   type PayrollComparison,
 } from '@/lib/payroll/calculations'
 import { parseRelativeDate, resolveWeekForDate } from '@/lib/payroll/resolve/dates'
+import { fetchAllRows } from '@/lib/supabase/fetchAll'
 import { curatedToProperty, CURATED_PROPERTY_COLUMNS, type CuratedPropertyRow } from '@/lib/payroll/properties'
 import type {
   PayrollEmployee,
@@ -136,12 +137,16 @@ export async function queryPay(
 
   for (const week of weeks) {
     const [{ data: entryData }, { data: adjData }] = await Promise.all([
-      ctx.supabase
+      // A week's entries exceed the 1,000-row select cap (spread legs) — drain in
+      // pages so the engine sees the whole week.
+      fetchAllRows((from, to) => ctx.supabase
         .from('payroll_time_entries')
         .select('id, employee_id, property_id, entry_date, regular_hours, ot_hours, pto_hours, is_overhead_spread')
         .eq('payroll_week_id', week.id)
         .eq('is_active', true)
-        .in('employee_id', empIds),
+        .in('employee_id', empIds)
+        .order('id')
+        .range(from, to)),
       ctx.supabase
         .from('payroll_adjustments')
         .select('id, employee_id, type, amount')
@@ -248,20 +253,24 @@ export async function queryTimeEntries(
   }
 ): Promise<TimeEntryReport> {
   const status = opts.status ?? 'active'
-  let q = ctx.supabase
-    .from('payroll_time_entries')
-    .select('entry_date, regular_hours, ot_hours, pto_hours, property_id, source, is_active, is_flagged')
-    .order('entry_date')
-    .limit(500)
+  // Drain past the 1,000-row select cap so count/total_hours cover every matching
+  // row; only the narrated entry list below is capped.
+  const { data, error } = await fetchAllRows((from, to) => {
+    let q = ctx.supabase
+      .from('payroll_time_entries')
+      .select('entry_date, regular_hours, ot_hours, pto_hours, property_id, source, is_active, is_flagged')
+      .order('entry_date')
+      .order('id')
+      .range(from, to)
 
-  if (status === 'active') q = q.eq('is_active', true)
-  else if (status === 'removed') q = q.eq('is_active', false)
-  if (opts.employeeId) q = q.eq('employee_id', opts.employeeId)
-  if (opts.propertyId) q = q.eq('property_id', opts.propertyId)
-  if (opts.fromDate) q = q.gte('entry_date', opts.fromDate)
-  if (opts.toDate) q = q.lte('entry_date', opts.toDate)
-
-  const { data, error } = await q
+    if (status === 'active') q = q.eq('is_active', true)
+    else if (status === 'removed') q = q.eq('is_active', false)
+    if (opts.employeeId) q = q.eq('employee_id', opts.employeeId)
+    if (opts.propertyId) q = q.eq('property_id', opts.propertyId)
+    if (opts.fromDate) q = q.gte('entry_date', opts.fromDate)
+    if (opts.toDate) q = q.lte('entry_date', opts.toDate)
+    return q
+  })
   if (error) throw new Error(`Failed to load time entries: ${error.message}`)
   const rows = (data ?? []) as PayrollTimeEntry[]
 
@@ -295,7 +304,9 @@ export async function queryTimeEntries(
     }
   })
 
-  return { status, entries, total_hours: round2(totalHours), count: entries.length }
+  // count/total_hours reflect every matching row; the listing itself stays capped
+  // so a wide date window can't flood the agent's context.
+  return { status, entries: entries.slice(0, 500), total_hours: round2(totalHours), count: entries.length }
 }
 
 function round2(n: number): number {
@@ -332,12 +343,15 @@ async function runWeekResult(
   properties: Property[]
 ): Promise<PayrollCalculationResult> {
   const [{ data: entryData }, { data: adjData }] = await Promise.all([
-    ctx.supabase
+    // A week's entries exceed the 1,000-row select cap (spread legs) — drain in pages.
+    fetchAllRows((from, to) => ctx.supabase
       .from('payroll_time_entries')
       .select('id, employee_id, property_id, entry_date, regular_hours, ot_hours, pto_hours, is_flagged, is_active, is_overhead_spread')
       .eq('payroll_week_id', week.id)
       .eq('is_active', true)
-      .eq('is_flagged', false),
+      .eq('is_flagged', false)
+      .order('id')
+      .range(from, to)),
     ctx.supabase
       .from('payroll_adjustments')
       .select('id, employee_id, type, amount')

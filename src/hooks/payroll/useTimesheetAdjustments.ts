@@ -62,19 +62,24 @@ export function useTimesheetAdjustments(weekId: string | null) {
   const fetchCorrections = useCallback(async () => {
     if (!weekId) { setCorrections([]); return }
     const supabase = createClient()
-    const { data } = await supabase
+    // Scope to the selected week through the corrected entry (!inner makes the
+    // filter bite) — a bulk audit can log 1,000+ correction rows, so page too.
+    const { data } = await fetchAllRows((from, to) => supabase
       .from('payroll_timesheet_corrections')
       .select(`
         *,
-        time_entry:payroll_time_entries(
-          id, entry_date, regular_hours, ot_hours, employee_id,
+        time_entry:payroll_time_entries!inner(
+          id, entry_date, regular_hours, ot_hours, employee_id, payroll_week_id,
           employee:payroll_employees(name),
           from_property:properties!payroll_time_entries_property_id_fkey(code, name)
         ),
         to_property:properties!payroll_timesheet_corrections_to_property_id_fkey(code, name),
         corrector:profiles!payroll_timesheet_corrections_corrected_by_fkey(email, full_name)
       `)
+      .eq('time_entry.payroll_week_id', weekId)
       .order('corrected_at', { ascending: false })
+      .order('id')
+      .range(from, to))
     setCorrections(data ?? [])
   }, [weekId])
 
