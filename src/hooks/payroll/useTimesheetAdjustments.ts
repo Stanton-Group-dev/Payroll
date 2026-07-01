@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { fetchAllRows } from '@/lib/supabase/fetchAll'
 import type { PayrollTimeEntry, PayrollTimesheetCorrection } from '@/lib/supabase/types'
 import { assertWeekWritable } from '@/lib/payroll/weekLock'
 
@@ -41,7 +42,7 @@ export function useTimesheetAdjustments(weekId: string | null) {
     setLoading(true)
     setError(null)
     const supabase = createClient()
-    const { data, error: err } = await supabase
+    const { data, error: err } = await fetchAllRows((from, to) => supabase
       .from('payroll_time_entries')
       .select(`
         *,
@@ -51,6 +52,8 @@ export function useTimesheetAdjustments(weekId: string | null) {
       .eq('payroll_week_id', weekId)
       .eq('is_active', true)
       .order('entry_date')
+      .order('id')
+      .range(from, to))
     if (err) setError(err.message)
     else setAllEntries(data ?? [])
     setLoading(false)

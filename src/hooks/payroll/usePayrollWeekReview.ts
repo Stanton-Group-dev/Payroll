@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { fetchAllRows } from '@/lib/supabase/fetchAll'
 import {
   isNonBillableProperty,
   curatedToProperty,
@@ -58,7 +59,9 @@ export function usePayrollWeekReview(weekId: string) {
     const [weekRes, empRes, entRes, adjRes, feeRes, propRes, portRes, approvalRes, ratesRes, mileageRes, holdsRes, splitRes, ovRes, globalConfigRes] = await Promise.all([
       supabase.from('payroll_weeks').select('*').eq('id', weekId).single(),
       supabase.from('payroll_employees').select('*').eq('is_active', true),
-      supabase.from('payroll_time_entries').select('*').eq('payroll_week_id', weekId).eq('is_flagged', false).eq('is_active', true),
+      // fetchAllRows: a week can exceed the 1,000-row select cap — a bare select
+      // would silently drop entries from the pay calculation.
+      fetchAllRows<PayrollTimeEntry>((from, to) => supabase.from('payroll_time_entries').select('*').eq('payroll_week_id', weekId).eq('is_flagged', false).eq('is_active', true).order('id').range(from, to)),
       supabase.from('payroll_adjustments').select('*').eq('payroll_week_id', weekId).eq('is_active', true),
       supabase.from('payroll_management_fee_config').select('*').order('effective_date', { ascending: false }),
       supabase.from('payroll_property').select(CURATED_PROPERTY_COLUMNS).eq('is_active', true),

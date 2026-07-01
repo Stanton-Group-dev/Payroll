@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { use } from 'react'
 import { Download, Lock } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
+import { fetchAllRows } from '@/lib/supabase/fetchAll'
 import { PageHeader, FormButton, InfoBlock } from '@/components/form'
 import { calculatePayroll, resolveRateAsOf, formatCurrency } from '@/lib/payroll/calculations'
 import {
@@ -40,7 +41,10 @@ export default function ADPExportPage({ params }: { params: Promise<{ weekId: st
       const [weekRes, empRes, entRes, adjRes, approvalRes, feeRes, propRes, ratesRes, mileageRes] = await Promise.all([
         supabase.from('payroll_weeks').select('*').eq('id', weekId).single(),
         supabase.from('payroll_employees').select('*').eq('is_active', true),
-        supabase.from('payroll_time_entries').select('*').eq('payroll_week_id', weekId).eq('is_flagged', false),
+        // is_active — deactivated (removed/split-away) entries must not be paid;
+        // fetchAllRows — a week can exceed the 1,000-row select cap, and a bare
+        // select would silently drop entries from the export.
+        fetchAllRows((from, to) => supabase.from('payroll_time_entries').select('*').eq('payroll_week_id', weekId).eq('is_flagged', false).eq('is_active', true).order('id').range(from, to)),
         supabase.from('payroll_adjustments').select('*').eq('payroll_week_id', weekId),
         supabase.from('payroll_approvals').select('*').eq('payroll_week_id', weekId).eq('stage', 'statement'),
         supabase.from('payroll_management_fee_config').select('*').order('effective_date', { ascending: false }),

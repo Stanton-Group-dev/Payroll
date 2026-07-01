@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { fetchAllRows } from '@/lib/supabase/fetchAll'
 
 /**
  * Per-employee hours that were deactivated for the week BUT have a logged correction
@@ -19,19 +20,28 @@ export function useAccountedRemovedHours(weekId: string | null) {
     if (!weekId) { setByEmployee(new Map()); return }
     const supabase = createClient()
 
-    const { data: inactive } = await supabase
+    const { data: inactive } = await fetchAllRows((from, to) => supabase
       .from('payroll_time_entries')
       .select('id, employee_id, regular_hours, ot_hours')
       .eq('payroll_week_id', weekId)
       .eq('is_active', false)
+      .order('id')
+      .range(from, to))
     if (!inactive || inactive.length === 0) { setByEmployee(new Map()); return }
 
+    // Chunk the id filter — hundreds of ids in one .in() overruns the URL, and
+    // the correction rows themselves can exceed the 1,000-row select cap.
     const ids = inactive.map(e => e.id)
-    const { data: corr } = await supabase
-      .from('payroll_timesheet_corrections')
-      .select('time_entry_id')
-      .in('time_entry_id', ids)
-    const accounted = new Set((corr ?? []).map(c => c.time_entry_id))
+    const accounted = new Set<string>()
+    for (let i = 0; i < ids.length; i += 200) {
+      const { data: corr } = await fetchAllRows((from, to) => supabase
+        .from('payroll_timesheet_corrections')
+        .select('time_entry_id')
+        .in('time_entry_id', ids.slice(i, i + 200))
+        .order('id')
+        .range(from, to))
+      for (const c of corr ?? []) accounted.add(c.time_entry_id)
+    }
 
     const m = new Map<string, number>()
     for (const e of inactive) {
