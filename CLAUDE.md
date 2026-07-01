@@ -230,3 +230,11 @@ it describes the live app, not a future merge.
 - **Least privilege:** contractors get dev‑only keys; CI/agents use scoped accounts, never god‑mode.
 - **Plan‑mode discipline** (`.windsurfrules`): present the plan and **wait for explicit confirmation**
   before implementing — don't infer "go" from the request.
+
+## Test login (shared — verify without a real person's password)
+
+This app authenticates against **Stanton Main DB** (Supabase Auth, project `wkwmxxlfheywwbgdbzxe`). To log in and verify a change in-browser, use the shared Stanton test user — do **not** invent one, hardcode credentials, or ask. There is deliberately **no test login in the code** (no secrets in the repo); this is it.
+
+- **Login:** `claude-test@payroll.test` (role `superadmin`, active)
+- **Password:** never in this repo. Fetch from Infisical at runtime: `infisical secrets get MAIN_TEST_PASSWORD --path /test-users --env prod --projectId b974f539-54dc-4687-9afd-941d95d434c9 --plain`
+- **Full registry + rotation:** `stanton-control/context/test-users.md`.
