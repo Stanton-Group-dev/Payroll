@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { fetchAllRows } from '@/lib/supabase/fetchAll'
 import { calculatePayroll, resolveRateAsOf } from '@/lib/payroll/calculations'
 import {
   curatedToProperty,
@@ -39,7 +40,9 @@ export function useADPReconciliation(weekId: string) {
       supabase.from('payroll_weeks').select('*').eq('id', weekId).single(),
       supabase.from('payroll_adp_reconciliation').select('*').eq('payroll_week_id', weekId).maybeSingle(),
       supabase.from('payroll_employees').select('*').eq('is_active', true),
-      supabase.from('payroll_time_entries').select('*').eq('payroll_week_id', weekId).eq('is_flagged', false),
+      // is_active — deactivated (removed/split-away) entries must not count toward
+      // system gross; fetchAllRows — a week can exceed the 1,000-row select cap.
+      fetchAllRows((from, to) => supabase.from('payroll_time_entries').select('*').eq('payroll_week_id', weekId).eq('is_flagged', false).eq('is_active', true).order('id').range(from, to)),
       supabase.from('payroll_adjustments').select('*').eq('payroll_week_id', weekId).eq('is_active', true),
       supabase.from('payroll_management_fee_config').select('*').order('effective_date', { ascending: false }),
       supabase.from('payroll_property').select(CURATED_PROPERTY_COLUMNS).eq('is_active', true),
