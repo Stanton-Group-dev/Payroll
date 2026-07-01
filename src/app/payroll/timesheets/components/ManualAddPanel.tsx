@@ -1,6 +1,7 @@
 ﻿'use client'
 
 import { useState } from 'react'
+import { format } from 'date-fns'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import type { PayrollEmployee, PayrollWeek } from '@/lib/supabase/types'
 import type { PropertyOption } from '@/hooks/payroll/useProperties'
@@ -24,6 +25,7 @@ export function ManualAddPanel({
   const [open, setOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [success, setSuccess] = useState<string | null>(null)
 
   const [form, setForm] = useState({
     date: '',
@@ -35,7 +37,11 @@ export function ManualAddPanel({
     reason: '',
   })
 
-  const set = (k: Partial<typeof form>) => setForm(f => ({ ...f, ...k }))
+  const set = (k: Partial<typeof form>) => { setSuccess(null); setForm(f => ({ ...f, ...k })) }
+
+  const PAY_TYPE_LABEL: Record<'regular' | 'overtime' | 'pto', string> = {
+    regular: 'regular h', overtime: 'OT h', pto: 'PTO h',
+  }
 
   const getSpreadPortfolioId = (): string | undefined => {
     const matching = portfolios.filter(port =>
@@ -46,6 +52,7 @@ export function ManualAddPanel({
 
   const handleAdd = async () => {
     setErr(null)
+    setSuccess(null)
     if (!selectedEmployee) { setErr('No employee selected'); return }
     if (!form.date) { setErr('Select a date'); return }
     const hrs = parseFloat(form.hours)
@@ -84,8 +91,18 @@ export function ManualAddPanel({
           payType: form.payType,
         })
       }
-      setForm({ date: '', hours: '', propertyId: '', payType: 'regular', useSpread: false, spreadPropertyIds: [], reason: '' })
-      setOpen(false)
+      // Confirm the add explicitly. The panel stays OPEN with a success line so the
+      // user sees it landed (the new row shows far down the grid, in the rightmost
+      // day column — easy to miss), rather than the panel silently collapsing and
+      // reading as a no-op — which led to repeated re-adds and duplicate entries.
+      const dest = form.useSpread
+        ? `spread across ${form.spreadPropertyIds.length} propert${form.spreadPropertyIds.length === 1 ? 'y' : 'ies'}`
+        : `→ ${properties.find(p => p.id === form.propertyId)?.code ?? 'property'}`
+      const dayLabel = format(new Date(form.date + 'T00:00:00'), 'EEE M/d')
+      setSuccess(`Added ${hrs} ${PAY_TYPE_LABEL[form.payType]} for ${selectedEmployee.name} on ${dayLabel} ${dest}. Add another or close.`)
+      // Preserve date + pay type so a follow-up add on the same day/type doesn't
+      // silently revert to Regular; clear only the entry-specific fields.
+      setForm(f => ({ ...f, hours: '', propertyId: '', spreadPropertyIds: [], reason: '' }))
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Failed to add entry')
     } finally {
@@ -95,7 +112,7 @@ export function ManualAddPanel({
 
   return (
     <div className="border border-[var(--border)]">
-      <button type="button" onClick={() => setOpen(v => !v)}
+      <button type="button" onClick={() => { setOpen(v => !v); setSuccess(null); setErr(null) }}
         className="w-full flex items-center justify-between px-5 py-3.5 bg-[var(--bg-section)] hover:bg-[var(--primary)]/5 transition-colors duration-200">
         <div>
           <span className="font-serif text-base text-[var(--primary)]">Add Hours</span>
@@ -109,6 +126,7 @@ export function ManualAddPanel({
       {open && (
         <div className="p-5 max-w-xl">
           {err && <InfoBlock variant="error">{err}</InfoBlock>}
+          {success && <InfoBlock variant="success">{success}</InfoBlock>}
 
           <div className="grid grid-cols-2 gap-4 mb-4">
             <FormField label="Employee">
