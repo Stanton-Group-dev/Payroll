@@ -168,13 +168,16 @@ export function useTimesheetAdjustments(weekId: string | null) {
       if (corrSplitErr) console.error('payroll_timesheet_corrections insert (split)', corrSplitErr)
     } else {
       // Simple reassign — move every source entry in the block to the property,
-      // preserving each entry's own regular/OT hours.
+      // preserving each entry's own regular/OT hours. Landing on a property makes the
+      // labor DIRECT billing, so the overhead-spread flag must clear: an entry carrying
+      // both would bill the same wages twice (Method A + the unit-weighted pool).
       const { error: updErr } = await supabase
         .from('payroll_time_entries')
         .update({
           property_id: splits[0].propertyId,
           source: 'workyard_corrected',
           is_flagged: false,
+          is_overhead_spread: false,
           pending_resolution: false,
           pending_note: null,
           pending_since: null,

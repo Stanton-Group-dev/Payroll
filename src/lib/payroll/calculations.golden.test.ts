@@ -272,6 +272,63 @@ describe('salaried hours never bill as direct property labor (Office Reno regres
 })
 
 // ---------------------------------------------------------------------------
+// Overhead-flag double-bill regression (2026-07-01): a timesheet reassign can land
+// an overhead-flagged ("Office") entry on a real property with the flag still set.
+// Such an entry must bill ONCE — direct to that property (property wins, per the
+// Office On-Site rule) — never a second time through the unit-weighted spread pool.
+// Week 06/22 shape: this double-billed the portfolio by the duplicated wages.
+// ---------------------------------------------------------------------------
+describe('overhead-flagged entry WITH a property bills once, direct (double-bill regression)', () => {
+  const directEntry: PayrollTimeEntry = {
+    ...timeEntry, id: 'te-d1', regular_hours: 10, ot_hours: 0,
+  }
+  // The bad shape: reassigned onto p1 but is_overhead_spread was left true.
+  const reassignedOverheadEntry: PayrollTimeEntry = {
+    ...timeEntry, id: 'te-o1', regular_hours: 5, ot_hours: 0,
+    is_overhead_spread: true,
+  }
+  // A well-formed office entry: flagged, no property — spreads via the pool.
+  const pureOverheadEntry: PayrollTimeEntry = {
+    ...timeEntry, id: 'te-o2', property_id: null, regular_hours: 3, ot_hours: 0,
+    is_overhead_spread: true,
+  }
+  const result = calculatePayroll(
+    [employee],
+    [directEntry, reassignedOverheadEntry, pureOverheadEntry],
+    [],
+    mgmtFeeConfigs,
+    [property],
+    [],
+    {},
+    WEEK_START
+  )
+
+  it('flagged entry with a property bills as direct labor, not into the pool', () => {
+    // labor = 10h×$20 + 5h×$20 = 300. The bug also pooled the 5h ($100), so labor
+    // stayed 300 but spread grew by a duplicate $100.
+    expect(cents(result.property_costs[0].labor_cost)).toBe(cents(300))
+  })
+
+  it('spread_cost carries only the property-less office entry', () => {
+    // Pool = 3h × $20 = 60 (single billable property absorbs all of it).
+    expect(cents(result.property_costs[0].spread_cost)).toBe(cents(60))
+  })
+
+  it('employee is paid once for all hours', () => {
+    // 18h × $20 = 360 — pay was never the bug; only the billing side duplicated.
+    expect(cents(result.employee_summaries[0].gross_pay)).toBe(cents(360))
+  })
+
+  it('Σ property total_cost = required_prefund (portfolio not over-billed)', () => {
+    // gross 360 + tax 28.80 + WC 10.80 + fee (300+60)×0.10 = 435.60 billed exactly.
+    // Pre-fix this billed 545.60 against a 445.60 prefund — a $100 over-bill.
+    const billed = result.property_costs.reduce((s, p) => s + p.total_cost, 0)
+    expect(cents(billed)).toBe(cents(result.required_prefund))
+    expect(cents(billed)).toBe(cents(435.60))
+  })
+})
+
+// ---------------------------------------------------------------------------
 // PRP-02 CF-7/CF-8 regression: recon/export consumer sees engine gross_pay,
 // not the old loop that added advances instead of subtracting them.
 // ---------------------------------------------------------------------------

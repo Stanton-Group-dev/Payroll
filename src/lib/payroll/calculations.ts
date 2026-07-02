@@ -414,9 +414,12 @@ export function calculatePayroll(
   // property. They're already PAID in the per-employee loop above; here their cost is
   // billed like salaried — spread across billable properties by unit count. Use the same
   // wage basis as direct labor (OT premium per the employee's classification).
+  // Only property-less rows belong in this pool: an overhead-flagged entry that carries a
+  // property_id (a reassignment onto a real building) already billed via Method A — direct,
+  // or through suppressedSpread — so pooling it too would bill the same wages twice.
   const empOverheadLabor: Record<string, number> = {}
   const overheadSpread = entries
-    .filter(e => e.is_overhead_spread)
+    .filter(e => e.is_overhead_spread && !e.property_id)
     .reduce((sum, e) => {
       const emp = employeeMap[e.employee_id]
       if (!emp) return sum
