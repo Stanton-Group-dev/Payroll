@@ -8,6 +8,8 @@ const prop = (over: Partial<BuiltInvoice['props'][number]>): BuiltInvoice['props
   property_code: 'S0001',
   property_name: 'S0001 - 12 Main St',
   address: '12 Main St, Hartford, CT 06106',
+  total_units: 10,
+  cost_per_unit: 0,
   labor_cost: 0,
   spread_cost: 0,
   mileage_cost: 0,
@@ -17,6 +19,7 @@ const prop = (over: Partial<BuiltInvoice['props'][number]>): BuiltInvoice['props
   mgmt_fee: 0,
   total_cost: 0,
   llc: 'SREP Southend LLC',
+  spread_by_dept: [],
   breakdown: [],
   ...over,
 })
@@ -54,9 +57,12 @@ const emp = (over: Partial<EmployeePaySummary>): EmployeePaySummary => ({
 const llcRows: BuiltInvoice[] = [
   inv({
     llc: 'SREP Southend LLC', total: 3337.36, mgmt_allocation: 223.14,
-    props: [prop({ labor_cost: 3000, tax_cost: 200, wc_cost: 75, mgmt_fee: 62.36, total_cost: 3337.36, breakdown: [{ act: 'Maintenance', hours: 40, labor: 3000 }] })],
+    props: [prop({ labor_cost: 3000, spread_cost: 500, tax_cost: 200, wc_cost: 75, mgmt_fee: 62.36, total_cost: 3337.36, spread_by_dept: [{ department: 'Maintenance', amount: 500 }], breakdown: [{ act: 'Maintenance', hours: 40, labor: 3000 }] })],
   }),
-  inv({ llc: 'SREP Westend LLC', total: 4363.81, mgmt_allocation: 635.93, props: [] }),
+  inv({
+    llc: 'SREP Westend LLC', total: 4363.81, mgmt_allocation: 635.93,
+    props: [prop({ property_id: 'p2', property_code: 'S0036', property_name: 'S0036 - 167 Seymour', llc: 'SREP Westend LLC', labor_cost: 3800, mgmt_fee: 380, total_cost: 4363.81, breakdown: [{ act: 'Maintenance', hours: 60, labor: 3800 }] })],
+  }),
 ]
 
 // Self-consistent fixture: the two LLCs' shares sum to mgmt.total, mirroring the
@@ -108,12 +114,32 @@ describe('buildStatementHtml', () => {
     expect(data.grand).toBeCloseTo(sumOwn + data.mgmt.total, 2)
   })
 
-  it('excludes remote employees from the hourly summary but keeps their reimbursements', () => {
+  it('the flat property cost summary totals to the same Total Payroll', () => {
     const html = build()
     const data = JSON.parse(html.match(/id="statement-data">([\s\S]*?)<\/script>/)![1])
-    expect(data.hourly.map((h: { employee_name: string }) => h.employee_name)).toEqual(['Maria <Lopez>'])
-    expect(data.reimb.map((r: { employee_name: string }) => r.employee_name)).toEqual(['Remote Rick'])
-    expect(data.reimb[0].is_remote).toBe(true)
+    // Every billable property incl. Office Reno; Σ total === grand === PDF total.
+    const sum = data.properties.reduce((s: number, p: { total: number }) => s + p.total, 0)
+    expect(sum).toBeCloseTo(data.grand, 2)
+    expect(data.properties.some((p: { code: string }) => p.code === 'Office Reno')).toBe(true)
+  })
+
+  it('carries the full per-employee pay detail, tagging remote staff', () => {
+    const html = build()
+    const data = JSON.parse(html.match(/id="statement-data">([\s\S]*?)<\/script>/)![1])
+    const names = data.employees.map((e: { employee_name: string }) => e.employee_name)
+    expect(names).toContain('Maria <Lopez>')
+    expect(names).toContain('Remote Rick')
+    const rick = data.employees.find((e: { employee_name: string }) => e.employee_name === 'Remote Rick')
+    expect(rick.is_remote).toBe(true)
+    // pay-detail fields the review table needs are present
+    expect(rick).toHaveProperty('total_billable')
+    expect(rick).toHaveProperty('payroll_tax')
+  })
+
+  it('aggregates the administrative spread by department', () => {
+    const html = build()
+    const data = JSON.parse(html.match(/id="statement-data">([\s\S]*?)<\/script>/)![1])
+    expect(data.adminByDept).toEqual([{ department: 'Maintenance', amount: 500 }])
   })
 
   it('escapes "<" so names cannot break out of the embedded data script', () => {

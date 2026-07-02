@@ -40,6 +40,11 @@ export interface InvoicePropLine {
   property_code: string
   property_name: string
   address: string | null
+  /** Unit count and per-unit cost, carried through from the engine's PropertyCostSummary
+   *  (already present at runtime via the `...pc` spread) so the statement HTML export can
+   *  show the same per-property detail the review page does. */
+  total_units: number
+  cost_per_unit: number
   labor_cost: number
   spread_cost: number
   mileage_cost: number
@@ -51,6 +56,9 @@ export interface InvoicePropLine {
   mgmt_fee: number
   total_cost: number
   llc: string
+  /** Department breakdown of spread_cost (from PropertyCostSummary) — feeds the
+   *  Administrative-by-department table in the statement HTML export. */
+  spread_by_dept: { department: string; amount: number }[]
   breakdown: { act: string; hours: number; labor: number }[]
 }
 
