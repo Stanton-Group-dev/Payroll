@@ -258,10 +258,8 @@ footer{border-top:1px solid var(--divider);padding-top:12px;margin-top:8px;color
       <table>
         <thead id="emp-head"></thead>
         <tbody id="emp-body"></tbody>
-        <tfoot id="emp-foot"></tfoot>
       </table>
     </div>
-    <p class="note">This is the <em>pay</em> side (wages + employer tax/WC + management fee). It differs from the billed Total Payroll above because reimbursements are billed through to the LLCs and advances are recovered from the employee but billed at full cost.</p>
   </section>
 
   <section id="admin-section">
@@ -475,15 +473,6 @@ footer{border-top:1px solid var(--divider);padding-top:12px;margin-top:8px;color
           return '<td class="' + (c.num ? 'r ' : '') + (c.cls || '') + '">' + c.render(e) + '</td>';
         }).join('') + '</tr>';
       }).join('') : '<tr><td colspan="13" class="dim" style="text-align:center;padding:16px">No matching employees</td></tr>';
-      var t = rows.reduce(function (a, e) {
-        a.rw += e.regular_wages; a.ow += e.ot_wages; a.ph += e.phone; a.mi += e.mileage; a.adv += e.advances;
-        a.g += e.gross_pay; a.tax += e.payroll_tax; a.wc += e.workers_comp; a.fee += e.management_fee; a.bill += e.total_billable; return a;
-      }, { rw: 0, ow: 0, ph: 0, mi: 0, adv: 0, g: 0, tax: 0, wc: 0, fee: 0, bill: 0 });
-      el('emp-foot').innerHTML = '<tr><td colspan="3">Total \\u2014 ' + rows.length + ' employees</td>' +
-        '<td class="r">' + money(t.rw) + '</td><td class="r">' + money(t.ow) + '</td><td class="r">' + money(t.ph) +
-        '</td><td class="r">' + money(t.mi) + '</td><td class="r">' + (t.adv ? '\\u2212' + money(t.adv) : '\\u2014') +
-        '</td><td class="r">' + money(t.g) + '</td><td class="r">' + money(t.tax) + '</td><td class="r">' + money(t.wc) +
-        '</td><td class="r">' + money(t.fee) + '</td><td class="r">' + money(t.bill) + '</td></tr>';
     }
     el('emp-head').addEventListener('click', function (ev) {
       var th = ev.target.closest('th'); if (!th || !th.getAttribute('data-key')) return;
