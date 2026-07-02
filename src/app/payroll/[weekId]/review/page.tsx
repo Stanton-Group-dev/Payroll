@@ -1,11 +1,10 @@
 'use client'
 
 import { useMemo, useState, use, type ReactNode } from 'react'
-import { DollarSign, Lock, CheckCircle2, FileDown } from 'lucide-react'
+import { DollarSign, Lock, CheckCircle2 } from 'lucide-react'
 import { usePayrollWeekReview } from '@/hooks/payroll/usePayrollWeekReview'
 import { PageHeader, FormButton, InfoBlock, StatusBadge } from '@/components/form'
 import { calculatePayroll, resolveRateAsOf, formatCurrency, SPREAD_OTHER_DEPT, type EmployeePaySummary } from '@/lib/payroll/calculations'
-import { downloadReviewHtml } from '@/lib/payroll/reviewHtmlExport'
 import { PayrollComparisonPanel } from '@/components/payroll/PayrollComparisonPanel'
 import { ManualReconcilePanel } from '@/components/payroll/ManualReconcilePanel'
 import { UnallocatedHoldsPanel } from '@/components/payroll/UnallocatedHoldsPanel'
@@ -126,28 +125,7 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
       <PageHeader
         title={`Payroll Review`}
         subtitle={week ? `Week of ${week.week_start} — ${week.week_end}` : ''}
-        actions={
-          <>
-            {result && (
-              <FormButton
-                variant="secondary"
-                size="sm"
-                title="Download a self-contained interactive HTML snapshot — viewable without logging in"
-                onClick={() => downloadReviewHtml({
-                  week: week ? { week_start: week.week_start, week_end: week.week_end, status: week.status } : null,
-                  result,
-                  includedCosts,
-                  excludedCostCount,
-                  prefundIncludesMgmtFee,
-                })}
-              >
-                <FileDown size={14} className="mr-2 inline" />
-                Export HTML
-              </FormButton>
-            )}
-            <StatusBadge status={week?.status ?? 'draft'} />
-          </>
-        }
+        actions={<StatusBadge status={week?.status ?? 'draft'} />}
       />
 
       <div className="p-6 space-y-6">

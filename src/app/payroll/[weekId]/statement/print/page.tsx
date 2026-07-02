@@ -19,11 +19,12 @@
 
 import { use, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, Download, Loader2 } from 'lucide-react'
+import { ArrowLeft, Download, FileDown, Loader2 } from 'lucide-react'
 import { useInvoiceBuild } from '@/hooks/payroll/useInvoiceBuild'
 import { formatCurrency } from '@/lib/payroll/calculations'
 import { compareLlcOrder } from '@/lib/payroll/llcOrder'
 import { downloadPdf } from '@/lib/payroll/downloadPdf'
+import { downloadStatementHtml } from '@/lib/payroll/statementHtmlExport'
 
 export default function StatementPrintPage({ params }: { params: Promise<{ weekId: string }> }) {
   const { weekId } = use(params)
@@ -39,6 +40,16 @@ export default function StatementPrintPage({ params }: { params: Promise<{ weekI
     } finally {
       setSaving(false)
     }
+  }
+
+  const handleExportHtml = () => {
+    downloadStatementHtml({
+      week: week ? { week_start: week.week_start, week_end: week.week_end, status: week.status } : null,
+      llcRows,
+      mgmtAllocation,
+      employeeSummaries,
+      remoteEmployeeIds: [...remoteEmployeeIds],
+    })
   }
 
   if (loading) return <div className="p-8 text-[var(--muted)]">Loading…</div>
@@ -99,10 +110,20 @@ export default function StatementPrintPage({ params }: { params: Promise<{ weekI
           {llcRows.length} LLCs · {emp.length} on-site employees · {formatCurrency(grand)} billed
           {wyError && <span className="text-[var(--error)]"> · cost codes unavailable</span>}
         </span>
-        <button onClick={handleDownload} disabled={saving} className="ml-auto flex items-center gap-2 px-4 py-2 bg-[var(--primary)] text-white text-sm disabled:opacity-60">
-          {saving ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-          {saving ? 'Generating…' : 'Download PDF'}
-        </button>
+        <div className="ml-auto flex items-center gap-2">
+          <button
+            onClick={handleExportHtml}
+            title="Download an interactive HTML copy of this statement — opens without logging in"
+            className="flex items-center gap-2 px-4 py-2 border border-[var(--primary)] text-[var(--primary)] text-sm hover:bg-[var(--primary)] hover:text-white"
+          >
+            <FileDown size={14} />
+            Export HTML
+          </button>
+          <button onClick={handleDownload} disabled={saving} className="flex items-center gap-2 px-4 py-2 bg-[var(--primary)] text-white text-sm disabled:opacity-60">
+            {saving ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
+            {saving ? 'Generating…' : 'Download PDF'}
+          </button>
+        </div>
       </div>
 
       {/* ── PAGE 1 — Statement: each LLC and its amount ── */}
