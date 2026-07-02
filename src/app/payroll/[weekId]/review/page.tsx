@@ -98,6 +98,15 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
   )
   const excludedCostCount = billableCosts.length - includedCosts.length
 
+  // Total Payroll — the full amount billed across every billable property. This is
+  // the same figure the weekly statement's "Total Payroll" shows (the statement folds
+  // Stanton Management's costs into the owner LLCs, but the sum is identical), so the
+  // review and the statement lead with one matching number.
+  const totalBilled = useMemo(
+    () => includedCosts.reduce((s, pc) => s + pc.total_cost, 0),
+    [includedCosts],
+  )
+
   // Week-wide Administrative (spread) cost broken out by department — the same mix
   // each property bears its unit-weighted share of. Summed over billable properties.
   const spreadByDept = useMemo(() => {
@@ -191,20 +200,17 @@ export default function WeekReviewPage({ params }: { params: Promise<{ weekId: s
 
         {result && (
           <>
-            {/* Pre-fund estimate */}
+            {/* Total Payroll — the amount billed across every property; matches the weekly statement. */}
             <div className="border-2 border-[var(--accent)] bg-white p-5">
               <div className="flex items-center gap-2 mb-3">
                 <DollarSign size={18} className="text-[var(--accent)]" />
-                <h2 className="font-serif text-lg text-[var(--primary)]">Required Pre-Fund Amount</h2>
+                <h2 className="font-serif text-lg text-[var(--primary)]">Total Payroll</h2>
               </div>
               <p className="text-4xl font-serif text-[var(--primary)] mb-2">
-                {formatCurrency(result.required_prefund)}
+                {formatCurrency(totalBilled)}
               </p>
               <p className="text-xs text-[var(--muted)]">
-                Gross Pay {formatCurrency(result.total_gross_pay)} + Payroll Tax {formatCurrency(result.total_payroll_tax)} + Workers&apos; Comp {formatCurrency(result.total_workers_comp)}{prefundIncludesMgmtFee ? <> + Mgmt Fee {formatCurrency(result.total_mgmt_fee)}</> : null}
-              </p>
-              <p className="text-xs text-[var(--warning)] mt-2">
-                ADP pulls from bank before LLC transfers arrive — fund this amount before submitting to ADP.
+                Billed across {includedCosts.length} properties — this is the weekly statement total.
               </p>
             </div>
 

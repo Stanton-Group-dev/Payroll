@@ -11,7 +11,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { usePayrollWeekReview } from './usePayrollWeekReview'
-import { calculatePayroll, SPREAD_OTHER_DEPT, type EmployeePaySummary } from '@/lib/payroll/calculations'
+import { calculatePayroll, resolveRateAsOf, SPREAD_OTHER_DEPT, type EmployeePaySummary } from '@/lib/payroll/calculations'
 import { compareLlcOrder } from '@/lib/payroll/llcOrder'
 import type { WorkyardRow } from '@/lib/payroll/csv-parser'
 
@@ -145,10 +145,21 @@ export function useInvoiceBuild(weekId: string) {
         mgmtAllocation: null as MgmtAllocation | null,
       }
     }
+    // Use the pay rates that were in effect during THIS week (same as the review
+    // page, ADP export, and reconciliation) — not each employee's current rate — so
+    // the statement's labor and totals match the review exactly. Also pass weekStart,
+    // the prefund flag, and the config-driven rate settings so every knob matches.
+    const weekStart = review.week?.week_start
+    const employeesForCalc = weekStart
+      ? review.employees.map(emp => ({
+          ...emp,
+          hourly_rate: resolveRateAsOf(emp.id, weekStart, review.employeeRates, emp.hourly_rate ?? 0),
+        }))
+      : review.employees
     const calc = calculatePayroll(
-      review.employees, review.entries, review.adjustments,
+      employeesForCalc, review.entries, review.adjustments,
       review.feeConfigs, review.properties, review.mileageReimbursements,
-      salariedDeptSplits,
+      salariedDeptSplits, weekStart, review.prefundIncludesMgmtFee, review.rateSettings,
     )
 
     // Cost-code hours per property CODE (Workyard projectName carries the S-code).
@@ -257,7 +268,7 @@ export function useInvoiceBuild(weekId: string) {
     return { invoices, employeeSummaries: calc.employee_summaries, mgmtAllocation }
   }, [review.loading, review.employees, review.entries, review.adjustments, review.feeConfigs,
       review.properties, review.mileageReimbursements, review.excludedPropertyIds, rows, ownerByPortfolio, fullAddrById,
-      salariedDeptSplits])
+      salariedDeptSplits, review.week, review.employeeRates, review.prefundIncludesMgmtFee, review.rateSettings])
 
   // Remote employees run on a separate payroll (pay_group = 'remote') and are
   // excluded from the on-site hourly summary on the statement.
