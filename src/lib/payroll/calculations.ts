@@ -373,7 +373,13 @@ export function calculatePayroll(
     if (!entry.property_id) continue
     const emp = employeeMap[entry.employee_id]
     if (!emp) continue
-    const rate = emp.hourly_rate ?? 0
+    // Salaried labor NEVER bills direct — their whole weekly_rate is spread portfolio-wide
+    // (Method B below), so any per-property cost here would double-bill. Guard on type, not
+    // on hourly_rate being null: callers that pre-resolve rate history (resolveRateAsOf) can
+    // hand a salaried employee their WEEKLY salary as an "hourly" rate, which would bill
+    // hours × weekly pay onto whatever property holds their entries. Hours still accumulate
+    // below (mileage weights); only the dollar cost is zeroed.
+    const rate = emp.type === 'salaried' ? 0 : (emp.hourly_rate ?? 0)
     // OT premium flows into the property's labor cost too (it bears the actual wage).
     const cost = (entry.regular_hours ?? 0) * rate + (entry.ot_hours ?? 0) * rate * otMultiplier(emp.type, emp.department, emp.ot_allowed)
     if (suppressedPropertyIds.has(entry.property_id)) {
@@ -414,7 +420,9 @@ export function calculatePayroll(
     .reduce((sum, e) => {
       const emp = employeeMap[e.employee_id]
       if (!emp) return sum
-      const rate = emp.hourly_rate ?? 0
+      // Same salaried guard as Method A: their weekly_rate is already in salariedSpread,
+      // so overhead-flagged salaried hours must not add a second (rate-injected) cost.
+      const rate = emp.type === 'salaried' ? 0 : (emp.hourly_rate ?? 0)
       const cost = (e.regular_hours ?? 0) * rate + (e.ot_hours ?? 0) * rate * otMultiplier(emp.type, emp.department, emp.ot_allowed)
       empOverheadLabor[e.employee_id] = (empOverheadLabor[e.employee_id] ?? 0) + cost
       return sum + cost
