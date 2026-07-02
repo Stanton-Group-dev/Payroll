@@ -60,7 +60,34 @@ export interface BuiltInvoice {
   amount: number
   mgmt: number
   total: number
+  /** This LLC's unit-share of the Stanton Management pass-through (0 when none).
+   *  Billed on top of `total` — the LLC's amount due is `total + mgmt_allocation`. */
+  mgmt_allocation: number
 }
+
+/** One LLC's share of the Stanton Management pass-through allocation. */
+export interface MgmtAllocationRow {
+  llc: string
+  units: number
+  amount: number
+}
+
+export interface MgmtAllocation {
+  /** The full Stanton Management amount re-billed to the ownership LLCs. */
+  total: number
+  totalUnits: number
+  rows: MgmtAllocationRow[]
+  /** Stanton Management's own invoice (the costs being allocated) — pulled out of
+   *  the payer list; kept here so the statement can show what made up the amount. */
+  source: BuiltInvoice
+}
+
+const normLlc = (s: string | null | undefined) => (s ?? '').trim().toLowerCase().replace(/\s+/g, ' ')
+/** The management company itself — matches "Stanton Management" / "Stanton Management LLC",
+ *  never the owner LLCs ("SREP …", "STANTON REP …"). */
+const isMgmtLlc = (s: string | null | undefined) => normLlc(s).startsWith('stanton management')
+
+const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100
 
 export function useInvoiceBuild(weekId: string) {
   const review = usePayrollWeekReview(weekId)
@@ -102,8 +129,14 @@ export function useInvoiceBuild(weekId: string) {
   // Salaried dept splits (override → default), resolved once in the shared review hook.
   const salariedDeptSplits = review.salariedDeptSplits
 
-  const { invoices, employeeSummaries } = useMemo(() => {
-    if (review.loading) return { invoices: [] as BuiltInvoice[], employeeSummaries: [] as EmployeePaySummary[] }
+  const { invoices, employeeSummaries, mgmtAllocation } = useMemo(() => {
+    if (review.loading) {
+      return {
+        invoices: [] as BuiltInvoice[],
+        employeeSummaries: [] as EmployeePaySummary[],
+        mgmtAllocation: null as MgmtAllocation | null,
+      }
+    }
     const calc = calculatePayroll(
       review.employees, review.entries, review.adjustments,
       review.feeConfigs, review.properties, review.mileageReimbursements,
@@ -162,16 +195,58 @@ export function useInvoiceBuild(weekId: string) {
     const byLlc: Record<string, InvoicePropLine[]> = {}
     for (const pl of propLines) (byLlc[pl.llc] ??= []).push(pl)
 
-    const invoices: BuiltInvoice[] = Object.entries(byLlc).map(([llc, props]) => ({
+    let invoices: BuiltInvoice[] = Object.entries(byLlc).map(([llc, props]) => ({
       llc,
       props: props.sort((a, b) => b.total_cost - a.total_cost),
       // Burden (tax + WC) is folded into the billable amount — no separate customer line.
       amount: props.reduce((s, p) => s + p.labor_cost + p.spread_cost + p.mileage_cost + p.expense_cost + p.tax_cost + p.wc_cost, 0),
       mgmt: props.reduce((s, p) => s + p.mgmt_fee, 0),
       total: props.reduce((s, p) => s + p.total_cost, 0),
+      mgmt_allocation: 0,
     })).sort((a, b) => compareLlcOrder(a.llc, b.llc))
 
-    return { invoices, employeeSummaries: calc.employee_summaries }
+    // Stanton Management pass-through: the management company's own costs (e.g. Office
+    // Reno) are never collected FROM Stanton Management — they are billed TO the
+    // ownership LLCs proportionally by unit count (no units → no share). Its invoice
+    // leaves the payer list; each share folds into that LLC's amount due. Display-layer
+    // only: the engine math and stored week data are untouched, and the statement grand
+    // total is conserved (the shares sum exactly to the amount removed).
+    let mgmtAllocation: MgmtAllocation | null = null
+    const mgmtInvoice = invoices.find(inv => isMgmtLlc(inv.llc))
+    if (mgmtInvoice && mgmtInvoice.total > 0) {
+      const unitsByLlc: Record<string, number> = {}
+      for (const p of review.properties) {
+        if (review.excludedPropertyIds.has(p.id)) continue
+        const llc = p.billing_llc || (p.portfolio_id ? ownerByPortfolio[p.portfolio_id] : null)
+        if (!llc || isMgmtLlc(llc)) continue
+        unitsByLlc[llc] = (unitsByLlc[llc] ?? 0) + (p.total_units ?? 0)
+      }
+      const withUnits = Object.entries(unitsByLlc).filter(([, u]) => u > 0)
+      const totalUnits = withUnits.reduce((s, [, u]) => s + u, 0)
+      if (totalUnits > 0) {
+        const allocRows = withUnits
+          .map(([llc, units]) => ({ llc, units, amount: round2(mgmtInvoice.total * (units / totalUnits)) }))
+          .sort((a, b) => compareLlcOrder(a.llc, b.llc))
+        // Absorb the rounding residue into the largest share so the rows sum exactly.
+        const diff = round2(mgmtInvoice.total - allocRows.reduce((s, r) => s + r.amount, 0))
+        if (diff !== 0) {
+          const biggest = allocRows.reduce((m, r) => (r.units > m.units ? r : m), allocRows[0])
+          biggest.amount = round2(biggest.amount + diff)
+        }
+        invoices = invoices.filter(inv => inv !== mgmtInvoice)
+        for (const r of allocRows) {
+          const inv = invoices.find(i => i.llc === r.llc)
+          if (inv) inv.mgmt_allocation = round2(inv.mgmt_allocation + r.amount)
+          // An LLC can hold units yet have no billed work this week — it still owes
+          // its share, so it gets an allocation-only invoice.
+          else invoices.push({ llc: r.llc, props: [], amount: 0, mgmt: 0, total: 0, mgmt_allocation: r.amount })
+        }
+        invoices.sort((a, b) => compareLlcOrder(a.llc, b.llc))
+        mgmtAllocation = { total: mgmtInvoice.total, totalUnits, rows: allocRows, source: mgmtInvoice }
+      }
+    }
+
+    return { invoices, employeeSummaries: calc.employee_summaries, mgmtAllocation }
   }, [review.loading, review.employees, review.entries, review.adjustments, review.feeConfigs,
       review.properties, review.mileageReimbursements, review.excludedPropertyIds, rows, ownerByPortfolio, fullAddrById,
       salariedDeptSplits])
@@ -191,6 +266,7 @@ export function useInvoiceBuild(weekId: string) {
     wyError,
     invoices,
     employeeSummaries,
+    mgmtAllocation,
     remoteEmployeeIds,
   }
 }

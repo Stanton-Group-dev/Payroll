@@ -7,6 +7,11 @@
  *   Page 3: Reimbursements & adjustments — per-employee phone, mileage, other
  *           adjustments, and advances/deductions (the non-wage payments this PDF
  *           authorizes). All employees with activity, remote included.
+ *   Then (when Stanton Management has costs this week) the Stanton Management
+ *   allocation invoice: its costs are never collected from Stanton Management —
+ *   they are billed to the ownership LLCs proportionally by unit count. This page
+ *   shows the source costs and the split; each LLC's statement line and invoice
+ *   already include its share. Sits right before the first LLC invoice.
  *   Then one page PER billing LLC: that LLC's itemized invoice. Each LLC starts on
  *   a fresh page; a large LLC may run 2–3 pages.
  * Works on a draft week (math from useInvoiceBuild — no approval/generation needed).
@@ -22,7 +27,7 @@ import { downloadPdf } from '@/lib/payroll/downloadPdf'
 
 export default function StatementPrintPage({ params }: { params: Promise<{ weekId: string }> }) {
   const { weekId } = use(params)
-  const { week, loading, error, wyError, invoices, employeeSummaries, remoteEmployeeIds } = useInvoiceBuild(weekId)
+  const { week, loading, error, wyError, invoices, employeeSummaries, mgmtAllocation, remoteEmployeeIds } = useInvoiceBuild(weekId)
   const [saving, setSaving] = useState(false)
 
   const handleDownload = async () => {
@@ -40,8 +45,10 @@ export default function StatementPrintPage({ params }: { params: Promise<{ weekI
   if (error) return <div className="p-8 text-[var(--error)]">Failed to load: {error}</div>
 
   // Statement summary — each LLC and its amount, in the fixed canonical order.
+  // An LLC's amount due includes its unit-share of the Stanton Management pass-through.
   const llcRows = [...invoices].sort((a, b) => compareLlcOrder(a.llc, b.llc))
-  const grand = llcRows.reduce((s, i) => s + i.total, 0)
+  const dueOf = (inv: (typeof invoices)[number]) => inv.total + inv.mgmt_allocation
+  const grand = llcRows.reduce((s, i) => s + dueOf(i), 0)
 
   // On-site hourly summary — exclude remote-run employees.
   const emp = employeeSummaries
@@ -115,7 +122,7 @@ export default function StatementPrintPage({ params }: { params: Promise<{ weekI
             {llcRows.map((inv, i) => (
               <tr key={inv.llc} className={`border-t border-[var(--divider)] ${i % 2 ? 'bg-[var(--bg-section)]/40' : ''}`}>
                 <td className="px-4 py-2 text-[var(--ink)]">{inv.llc}</td>
-                <td className="px-4 py-2 text-right">{formatCurrency(inv.total)}</td>
+                <td className="px-4 py-2 text-right">{formatCurrency(dueOf(inv))}</td>
               </tr>
             ))}
             {llcRows.length === 0 && (
@@ -242,6 +249,98 @@ export default function StatementPrintPage({ params }: { params: Promise<{ weekI
         </section>
       )}
 
+      {/* ── Stanton Management allocation — its costs billed to the ownership LLCs
+             proportionally by unit count (no units, no share) ── */}
+      {mgmtAllocation && (
+        <section className="max-w-4xl mx-auto px-8 py-10 break-before-page">
+          <div className="flex items-start justify-between mb-6">
+            <div>
+              <h2 className="font-serif text-2xl text-[var(--ink)]">Stanton Management LLC</h2>
+              <p className="text-sm text-[var(--muted)] mt-1">Billed to ownership LLCs · Service period {week?.week_start} – {week?.week_end}</p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-[var(--muted)] uppercase tracking-widest mb-0.5">Billed to Ownership LLCs</p>
+              <p className="font-serif text-2xl text-[var(--primary)]">{formatCurrency(mgmtAllocation.total)}</p>
+            </div>
+          </div>
+
+          <p className="text-xs text-[var(--muted)] italic mb-4">
+            Stanton Management costs are billed to each ownership LLC in proportion to its unit count;
+            LLCs with no units receive no allocation. Each LLC&apos;s share is included in its statement
+            line and invoice.
+          </p>
+
+          <table className="w-full text-sm border border-[var(--border)] mb-6">
+            <thead>
+              <tr className="bg-[var(--primary)] text-white text-xs">
+                <th className="px-4 py-2 text-left font-medium">Property / Activity</th>
+                <th className="px-3 py-2 text-right font-medium">Hours</th>
+                <th className="px-3 py-2 text-right font-medium">Amount</th>
+                <th className="px-3 py-2 text-right font-medium">Mgmt Fee</th>
+                <th className="px-4 py-2 text-right font-medium">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {mgmtAllocation.source.props.map(p => (
+                <FragmentRows key={p.property_id}>
+                  <tr className="border-t border-[var(--divider)] bg-[var(--bg-section)]/40">
+                    <td className="px-4 py-2 font-medium text-[var(--ink)]">
+                      {p.property_code} - {p.address || p.property_name.replace(/^S\d+\s*[-–]\s*/, '')}
+                    </td>
+                    <td />
+                    <td className="px-3 py-2 text-right">{formatCurrency(p.labor_cost + p.spread_cost + p.mileage_cost + p.expense_cost + p.tax_cost + p.wc_cost)}</td>
+                    <td className="px-3 py-2 text-right text-[var(--muted)]">{formatCurrency(p.mgmt_fee)}</td>
+                    <td className="px-4 py-2 text-right font-semibold">{formatCurrency(p.total_cost)}</td>
+                  </tr>
+                  {p.breakdown.map((b, i) => (
+                    <tr key={i} className="text-xs text-[var(--muted)]">
+                      <td className="pl-10 pr-4 py-1">{b.act}</td>
+                      <td className="px-3 py-1 text-right">{b.hours ? b.hours.toFixed(1) : '—'}</td>
+                      <td className="px-3 py-1 text-right">{formatCurrency(b.labor)}</td>
+                      <td /><td />
+                    </tr>
+                  ))}
+                </FragmentRows>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="border-t-2 border-[var(--primary)] bg-[var(--primary)]/5 font-medium">
+                <td className="px-4 py-2 font-serif text-[var(--primary)]">Total to Allocate</td>
+                <td /><td className="px-3 py-2 text-right">{formatCurrency(mgmtAllocation.source.amount)}</td>
+                <td className="px-3 py-2 text-right">{formatCurrency(mgmtAllocation.source.mgmt)}</td>
+                <td className="px-4 py-2 text-right font-serif text-[var(--primary)]">{formatCurrency(mgmtAllocation.source.total)}</td>
+              </tr>
+            </tfoot>
+          </table>
+
+          <table className="w-full text-sm border border-[var(--border)]">
+            <thead>
+              <tr className="bg-[var(--primary)] text-white text-xs">
+                <th className="px-4 py-2 text-left font-medium">Billing LLC</th>
+                <th className="px-3 py-2 text-right font-medium">Units</th>
+                <th className="px-4 py-2 text-right font-medium">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {mgmtAllocation.rows.map((r, i) => (
+                <tr key={r.llc} className={`border-t border-[var(--divider)] ${i % 2 ? 'bg-[var(--bg-section)]/40' : ''}`}>
+                  <td className="px-4 py-2 text-[var(--ink)]">{r.llc}</td>
+                  <td className="px-3 py-2 text-right">{r.units}</td>
+                  <td className="px-4 py-2 text-right">{formatCurrency(r.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr className="border-t-2 border-[var(--primary)] bg-[var(--primary)]/5 font-semibold">
+                <td className="px-4 py-3 font-serif text-[var(--primary)]">Total Allocated</td>
+                <td className="px-3 py-3 text-right">{mgmtAllocation.totalUnits}</td>
+                <td className="px-4 py-3 text-right font-serif text-[var(--primary)]">{formatCurrency(mgmtAllocation.total)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </section>
+      )}
+
       {/* ── One page per LLC — itemized invoice (each starts on a fresh page) ── */}
       {llcRows.map(inv => (
         <section key={inv.llc} className="max-w-4xl mx-auto px-8 py-10 break-before-page">
@@ -252,7 +351,7 @@ export default function StatementPrintPage({ params }: { params: Promise<{ weekI
             </div>
             <div className="text-right">
               <p className="text-xs text-[var(--muted)] uppercase tracking-widest mb-0.5">Amount Due</p>
-              <p className="font-serif text-2xl text-[var(--primary)]">{formatCurrency(inv.total)}</p>
+              <p className="font-serif text-2xl text-[var(--primary)]">{formatCurrency(dueOf(inv))}</p>
             </div>
           </div>
 
@@ -288,13 +387,20 @@ export default function StatementPrintPage({ params }: { params: Promise<{ weekI
                   ))}
                 </FragmentRows>
               ))}
+              {inv.mgmt_allocation > 0 && (
+                <tr className="border-t border-[var(--divider)] bg-[var(--bg-section)]/40">
+                  <td className="px-4 py-2 font-medium text-[var(--ink)]">Stanton Management — allocated by unit count</td>
+                  <td /><td /><td />
+                  <td className="px-4 py-2 text-right font-semibold">{formatCurrency(inv.mgmt_allocation)}</td>
+                </tr>
+              )}
             </tbody>
             <tfoot>
               <tr className="border-t-2 border-[var(--primary)] bg-[var(--primary)]/5 font-medium">
                 <td className="px-4 py-2 font-serif text-[var(--primary)]">Total Due</td>
                 <td /><td className="px-3 py-2 text-right">{formatCurrency(inv.amount)}</td>
                 <td className="px-3 py-2 text-right">{formatCurrency(inv.mgmt)}</td>
-                <td className="px-4 py-2 text-right font-serif text-[var(--primary)]">{formatCurrency(inv.total)}</td>
+                <td className="px-4 py-2 text-right font-serif text-[var(--primary)]">{formatCurrency(dueOf(inv))}</td>
               </tr>
             </tfoot>
           </table>

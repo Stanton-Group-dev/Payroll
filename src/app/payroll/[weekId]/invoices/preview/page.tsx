@@ -14,7 +14,7 @@ import { downloadPdf } from '@/lib/payroll/downloadPdf'
 
 export default function InvoicePreviewPage({ params }: { params: Promise<{ weekId: string }> }) {
   const { weekId } = use(params)
-  const { week, loading, error, wyLoading, wyError, invoices } = useInvoiceBuild(weekId)
+  const { week, loading, error, wyLoading, wyError, invoices, mgmtAllocation } = useInvoiceBuild(weekId)
   const [saving, setSaving] = useState(false)
 
   const handleDownload = async () => {
@@ -31,7 +31,8 @@ export default function InvoicePreviewPage({ params }: { params: Promise<{ weekI
   if (loading) return <div className="p-8 text-[var(--muted)]">Loading payroll…</div>
   if (error) return <div className="p-8 text-[var(--error)]">Failed to load: {error}</div>
 
-  const grand = invoices.reduce((s, i) => s + i.total, 0)
+  // An LLC's amount due includes its unit-share of the Stanton Management pass-through.
+  const grand = invoices.reduce((s, i) => s + i.total + i.mgmt_allocation, 0)
 
   return (
     <div className="print:p-0">
@@ -61,11 +62,46 @@ export default function InvoicePreviewPage({ params }: { params: Promise<{ weekI
           </p>
         </div>
 
+        {/* Stanton Management pass-through — its costs billed to the ownership LLCs by unit count */}
+        {mgmtAllocation && (
+          <div className="border border-[var(--border)] bg-white">
+            <div className="px-5 py-3 bg-[var(--primary)] text-white flex items-center justify-between">
+              <span className="font-serif text-base">Stanton Management LLC — billed to ownership LLCs</span>
+              <span className="font-serif text-lg">{formatCurrency(mgmtAllocation.total)}</span>
+            </div>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-xs text-[var(--muted)] bg-[var(--bg-section)]">
+                  <th className="px-4 py-2 text-left font-medium">Billing LLC</th>
+                  <th className="px-3 py-2 text-right font-medium">Units</th>
+                  <th className="px-4 py-2 text-right font-medium">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {mgmtAllocation.rows.map(r => (
+                  <tr key={r.llc} className="border-t border-[var(--divider)]">
+                    <td className="px-4 py-1.5 text-[var(--ink)]">{r.llc}</td>
+                    <td className="px-3 py-1.5 text-right">{r.units}</td>
+                    <td className="px-4 py-1.5 text-right">{formatCurrency(r.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-[var(--primary)] bg-[var(--primary)]/5 font-medium">
+                  <td className="px-4 py-2 font-serif text-[var(--primary)]">Total Allocated</td>
+                  <td className="px-3 py-2 text-right">{mgmtAllocation.totalUnits}</td>
+                  <td className="px-4 py-2 text-right font-serif text-[var(--primary)]">{formatCurrency(mgmtAllocation.total)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+
         {invoices.map(inv => (
           <div key={inv.llc} className="border border-[var(--border)] bg-white">
             <div className="px-5 py-3 bg-[var(--primary)] text-white flex items-center justify-between">
               <span className="font-serif text-base">{inv.llc}</span>
-              <span className="font-serif text-lg">{formatCurrency(inv.total)}</span>
+              <span className="font-serif text-lg">{formatCurrency(inv.total + inv.mgmt_allocation)}</span>
             </div>
             <table className="w-full text-sm">
               <thead>
@@ -99,13 +135,20 @@ export default function InvoicePreviewPage({ params }: { params: Promise<{ weekI
                     ))}
                   </FragmentRows>
                 ))}
+                {inv.mgmt_allocation > 0 && (
+                  <tr className="border-t border-[var(--divider)] bg-[var(--bg-section)]/40">
+                    <td className="px-4 py-2 font-medium text-[var(--ink)]">Stanton Management — allocated by unit count</td>
+                    <td /><td /><td />
+                    <td className="px-4 py-2 text-right font-semibold">{formatCurrency(inv.mgmt_allocation)}</td>
+                  </tr>
+                )}
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-[var(--primary)] bg-[var(--primary)]/5 font-medium">
                   <td className="px-4 py-2 font-serif text-[var(--primary)]">Total Due</td>
                   <td /><td className="px-3 py-2 text-right">{formatCurrency(inv.amount)}</td>
                   <td className="px-3 py-2 text-right">{formatCurrency(inv.mgmt)}</td>
-                  <td className="px-4 py-2 text-right font-serif text-[var(--primary)]">{formatCurrency(inv.total)}</td>
+                  <td className="px-4 py-2 text-right font-serif text-[var(--primary)]">{formatCurrency(inv.total + inv.mgmt_allocation)}</td>
                 </tr>
               </tfoot>
             </table>
