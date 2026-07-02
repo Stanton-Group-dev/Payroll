@@ -44,8 +44,12 @@ export default function StatementPrintPage({ params }: { params: Promise<{ weekI
   if (loading) return <div className="p-8 text-[var(--muted)]">Loading…</div>
   if (error) return <div className="p-8 text-[var(--error)]">Failed to load: {error}</div>
 
-  // Statement summary — each LLC and its amount, in the fixed canonical order.
-  // An LLC's amount due includes its unit-share of the Stanton Management pass-through.
+  // Statement summary — the transfer list. Each LLC's line is its OWN property costs;
+  // the Stanton Management pass-through is a separate line with per-LLC sub-lines
+  // (allocated by unit count), so every transfer is explicit and nothing is folded
+  // invisibly into another line. An LLC's full transfer = its line + its sub-line;
+  // the per-LLC invoice pages itemize both. Total Payroll = LLC lines + the Stanton
+  // Management line — the same grand total as before, just no longer hidden.
   const llcRows = [...invoices].sort((a, b) => compareLlcOrder(a.llc, b.llc))
   const dueOf = (inv: (typeof invoices)[number]) => inv.total + inv.mgmt_allocation
   const grand = llcRows.reduce((s, i) => s + dueOf(i), 0)
@@ -122,10 +126,26 @@ export default function StatementPrintPage({ params }: { params: Promise<{ weekI
             {llcRows.map((inv, i) => (
               <tr key={inv.llc} className={`border-t border-[var(--divider)] ${i % 2 ? 'bg-[var(--bg-section)]/40' : ''}`}>
                 <td className="px-4 py-2 text-[var(--ink)]">{inv.llc}</td>
-                <td className="px-4 py-2 text-right">{formatCurrency(dueOf(inv))}</td>
+                <td className="px-4 py-2 text-right">{formatCurrency(inv.total)}</td>
               </tr>
             ))}
-            {llcRows.length === 0 && (
+            {mgmtAllocation && (
+              <>
+                <tr className="border-t border-[var(--divider)] font-medium">
+                  <td className="px-4 py-2 text-[var(--ink)]">Stanton Management LLC</td>
+                  <td className="px-4 py-2 text-right">{formatCurrency(mgmtAllocation.total)}</td>
+                </tr>
+                {mgmtAllocation.rows.map(r => (
+                  <tr key={r.llc} className="text-xs text-[var(--muted)]">
+                    <td className="pl-10 pr-4 py-1">
+                      {r.llc} — {r.units} of {mgmtAllocation.totalUnits} units
+                    </td>
+                    <td className="px-4 py-1 text-right">{formatCurrency(r.amount)}</td>
+                  </tr>
+                ))}
+              </>
+            )}
+            {llcRows.length === 0 && !mgmtAllocation && (
               <tr><td colSpan={2} className="px-4 py-8 text-center text-[var(--muted)]">No billable costs for this week.</td></tr>
             )}
           </tbody>
@@ -136,6 +156,14 @@ export default function StatementPrintPage({ params }: { params: Promise<{ weekI
             </tr>
           </tfoot>
         </table>
+        {mgmtAllocation && (
+          <p className="text-xs text-[var(--muted)] italic mt-3">
+            Stanton Management&apos;s costs are billed to the ownership LLCs by unit count
+            ({mgmtAllocation.totalUnits} units across the portfolio) — the indented lines are each
+            LLC&apos;s share. An LLC&apos;s full transfer is its own line plus its indented share;
+            its invoice page itemizes both.
+          </p>
+        )}
       </section>
 
       {/* ── PAGE 2 — On-site hourly summary (remote run excluded) ── */}
