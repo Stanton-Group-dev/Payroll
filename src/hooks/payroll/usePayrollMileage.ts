@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { fetchAllRows } from '@/lib/supabase/fetchAll'
 import { resolveMileageRateAsOf } from '@/lib/payroll/calculations'
 import { assertWeekWritable } from '@/lib/payroll/weekLock'
 import type {
@@ -50,12 +51,16 @@ export function usePayrollMileage(weekId: string | undefined) {
     const [weekRes, empRes, entRes, recRes, rateRes] = await Promise.all([
       supabase.from('payroll_weeks').select('week_start').eq('id', weekId).single(),
       supabase.from('payroll_employees').select('*').eq('is_active', true).order('name'),
-      supabase
+      // A week's entries exceed the 1,000-row select cap (spread legs) — drain in
+      // pages so no one's miles are undercounted.
+      fetchAllRows((from, to) => supabase
         .from('payroll_time_entries')
         .select('employee_id, miles')
         .eq('payroll_week_id', weekId)
         .eq('is_active', true)
-        .eq('is_flagged', false),
+        .eq('is_flagged', false)
+        .order('id')
+        .range(from, to)),
       supabase.from('payroll_mileage_reimbursements').select('*').eq('payroll_week_id', weekId),
       supabase.from('payroll_mileage_rates').select('*').order('effective_date', { ascending: false }),
     ])

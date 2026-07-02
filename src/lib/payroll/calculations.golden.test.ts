@@ -210,6 +210,125 @@ describe('calculatePayroll — golden week 2026-06-08', () => {
 })
 
 // ---------------------------------------------------------------------------
+// Office Reno regression (2026-07-01): a salaried employee's WEEKLY salary can
+// reach the engine in hourly_rate — payroll_employee_rates stores weekly rates
+// for salaried staff, and callers pre-resolve rate history into hourly_rate via
+// resolveRateAsOf. Their hours on a property must still bill $0 direct labor
+// (weekly_rate already spreads portfolio-wide via Method B), and overhead-flagged
+// salaried hours must not add a second cost to the spread pool.
+// ---------------------------------------------------------------------------
+describe('salaried hours never bill as direct property labor (Office Reno regression)', () => {
+  const salaried: PayrollEmployee = {
+    ...employee,
+    id: 's1',
+    name: 'S One',
+    type: 'salaried',
+    weekly_rate: 1100,
+    hourly_rate: 1100, // weekly salary injected as "hourly" by rate-history resolution
+    ot_allowed: false,
+  }
+  const salariedDirectEntry: PayrollTimeEntry = {
+    ...timeEntry, id: 'te-s1', employee_id: 's1', regular_hours: 8, ot_hours: 0,
+  }
+  const salariedOverheadEntry: PayrollTimeEntry = {
+    ...timeEntry, id: 'te-s2', employee_id: 's1', regular_hours: 2, ot_hours: 0,
+    is_overhead_spread: true,
+  }
+  const hourlyEntry: PayrollTimeEntry = {
+    ...timeEntry, id: 'te-h1', regular_hours: 10, ot_hours: 0,
+  }
+  const result = calculatePayroll(
+    [employee, salaried],
+    [hourlyEntry, salariedDirectEntry, salariedOverheadEntry],
+    [],
+    mgmtFeeConfigs,
+    [property],
+    [],
+    {},
+    WEEK_START
+  )
+
+  it('property labor_cost carries only hourly labor — salaried hours bill $0 direct', () => {
+    // e1: 10h × $20 = 200. s1's 8h at the injected $1,100 "hourly" rate must NOT appear
+    // (the bug billed 8 × 1100 = $8,800 of phantom labor).
+    expect(cents(result.property_costs[0].labor_cost)).toBe(cents(200))
+  })
+
+  it('spread_cost carries the weekly_rate once — overhead-flagged salaried hours add nothing', () => {
+    // Single property owns all units → full spread lands on it: exactly the $1,100
+    // weekly salary, with no extra 2h × 1100 from the overhead-flagged entry.
+    expect(cents(result.property_costs[0].spread_cost)).toBe(cents(1100))
+  })
+
+  it('salaried gross_pay stays weekly_rate', () => {
+    const s = result.employee_summaries.find(e => e.employee_id === 's1')!
+    expect(cents(s.gross_pay)).toBe(cents(1100))
+  })
+
+  it('billed total still equals required_prefund (no advances this week)', () => {
+    const billed = result.property_costs.reduce((s, p) => s + p.total_cost, 0)
+    expect(cents(billed)).toBe(cents(result.required_prefund))
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Overhead-flag double-bill regression (2026-07-01): a timesheet reassign can land
+// an overhead-flagged ("Office") entry on a real property with the flag still set.
+// Such an entry must bill ONCE — direct to that property (property wins, per the
+// Office On-Site rule) — never a second time through the unit-weighted spread pool.
+// Week 06/22 shape: this double-billed the portfolio by the duplicated wages.
+// ---------------------------------------------------------------------------
+describe('overhead-flagged entry WITH a property bills once, direct (double-bill regression)', () => {
+  const directEntry: PayrollTimeEntry = {
+    ...timeEntry, id: 'te-d1', regular_hours: 10, ot_hours: 0,
+  }
+  // The bad shape: reassigned onto p1 but is_overhead_spread was left true.
+  const reassignedOverheadEntry: PayrollTimeEntry = {
+    ...timeEntry, id: 'te-o1', regular_hours: 5, ot_hours: 0,
+    is_overhead_spread: true,
+  }
+  // A well-formed office entry: flagged, no property — spreads via the pool.
+  const pureOverheadEntry: PayrollTimeEntry = {
+    ...timeEntry, id: 'te-o2', property_id: null, regular_hours: 3, ot_hours: 0,
+    is_overhead_spread: true,
+  }
+  const result = calculatePayroll(
+    [employee],
+    [directEntry, reassignedOverheadEntry, pureOverheadEntry],
+    [],
+    mgmtFeeConfigs,
+    [property],
+    [],
+    {},
+    WEEK_START
+  )
+
+  it('flagged entry with a property bills as direct labor, not into the pool', () => {
+    // labor = 10h×$20 + 5h×$20 = 300. The bug also pooled the 5h ($100), so labor
+    // stayed 300 but spread grew by a duplicate $100.
+    expect(cents(result.property_costs[0].labor_cost)).toBe(cents(300))
+  })
+
+  it('spread_cost carries only the property-less office entry', () => {
+    // Pool = 3h × $20 = 60 (single billable property absorbs all of it).
+    expect(cents(result.property_costs[0].spread_cost)).toBe(cents(60))
+  })
+
+  it('employee is paid once for all hours', () => {
+    // 18h × $20 = 360 — pay was never the bug; only the billing side duplicated.
+    expect(cents(result.employee_summaries[0].gross_pay)).toBe(cents(360))
+  })
+
+  it('Σ property total_cost = required_prefund (portfolio not over-billed)', () => {
+    // gross 360 + tax 28.80 + WC 10.80 + fee (300+60)×0.10 = 435.60 billed exactly.
+    // Pre-fix this billed 545.60 against a 445.60 prefund — a $100 over-bill.
+    const billed = result.property_costs.reduce((s, p) => s + p.total_cost, 0)
+    expect(cents(billed)).toBe(cents(result.required_prefund))
+    expect(cents(billed)).toBe(cents(435.60))
+  })
+})
+
+// ---------------------------------------------------------------------------
 // PRP-02 CF-7/CF-8 regression: recon/export consumer sees engine gross_pay,
 // not the old loop that added advances instead of subtracting them.
 // ---------------------------------------------------------------------------

@@ -14,6 +14,7 @@ import {
   type ResolvedWeek,
 } from '@/lib/payroll/resolve/dates'
 import { propertiesInPortfolio, type ResolvedProperty } from '@/lib/payroll/resolve/entities'
+import { fetchAllRows } from '@/lib/supabase/fetchAll'
 
 const ISO_DATE = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'date must be yyyy-MM-dd')
 const HOURS = z.number().positive('hours must be > 0').max(24, 'hours cannot exceed 24 for a single day')
@@ -572,13 +573,17 @@ export const copyWeek: Operation<CopyWeekInput, CopyWeekResult> = {
 
     let srcRows: SourceEntry[] = []
     if (from) {
-      const { data, error } = await ctx.supabase
+      // A spread-heavy employee-week (one row per property × day) can pass the
+      // 1,000-row select cap — drain in pages so the copy is never silently partial.
+      const { data, error } = await fetchAllRows((rangeFrom, rangeTo) => ctx.supabase
         .from('payroll_time_entries')
         .select('property_id, entry_date, regular_hours, ot_hours, pto_hours, miles, is_flagged, flag_reason, pending_resolution')
         .eq('employee_id', input.fromEmployeeId)
         .eq('payroll_week_id', input.weekId)
         .eq('is_active', true)
         .order('entry_date')
+        .order('id')
+        .range(rangeFrom, rangeTo))
       if (error) throw new Error(`Failed to load source entries: ${error.message}`)
       srcRows = (data ?? []) as SourceEntry[]
       if (!input.includeUnallocated) {
